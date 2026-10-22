@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!entrypoint.py
+!browser.py
+!native_firefox.py
+!desktop_clipboard.py
+!welcome.html
