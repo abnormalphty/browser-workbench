@@ -1,0 +1,8 @@
+data
+verification-data
+.venv
+.git
+__pycache__
+*.pyc
+*.log
+.env*
