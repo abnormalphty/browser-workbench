@@ -96,7 +96,7 @@ def create_app(data_dir: Path | None = None):
 
     @app.get('/health')
     def health():
-        return {'app':'browser-workbench', 'version':'0.6'}
+        return {'app':'browser-workbench', 'version':'0.6.1'}
 
     @app.get('/api/state')
     def state():
@@ -201,10 +201,7 @@ def create_app(data_dir: Path | None = None):
 
     @app.post('/api/runtime/open')
     def open_docker():
-        import subprocess
-        if not Path('/Applications/Docker.app').exists():
-            raise ValueError('Docker Desktop 尚未安装，请使用安装说明准备运行组件。')
-        subprocess.Popen(['open','-a','Docker'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        runtime.build()
         return {'ok':True}
 
     @app.get('/api/environments/{env_id}/view')

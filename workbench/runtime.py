@@ -40,6 +40,7 @@ class Runtime(ResourceControls):
         self.errors = {}
         self.build_state = 'idle'
         self.build_error = None
+        self.prepare_phase = 'idle'
         self.scope = __import__('hashlib').sha256(str(store.data_dir).encode()).hexdigest()[:12]
         from .geography import Geography
         self.geography = Geography(store,self)
@@ -84,7 +85,7 @@ class Runtime(ResourceControls):
         if info.get('ready'):
             try:image=self._run(['image','inspect',IMAGE],timeout=5,check=False).returncode==0
             except ValueError:pass
-        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'max_running':self.store.resource_settings()['max_running']}
+        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'max_running':self.store.resource_settings()['max_running']}
 
     def container_name(self, env_id):
         self.store.valid_id(env_id)
@@ -243,7 +244,46 @@ class Runtime(ResourceControls):
             if self.build_state == 'building':
                 return
             self.build_state, self.build_error = 'building', None
-            threading.Thread(target=self._build_job, daemon=True).start()
+            self.prepare_phase = 'checking'
+            threading.Thread(target=self._prepare_job, daemon=True).start()
+
+    def _open_desktop(self):
+        if __import__('sys').platform != 'darwin':
+            raise ValueError('请先启动本机 Docker 服务，再点击一键准备。')
+        result = subprocess.run(['open','-a','Docker'], capture_output=True, timeout=15)
+        if result.returncode:
+            raise ValueError('未能打开 Docker Desktop，请检查它是否已正确安装。')
+
+    def _prepare_job(self, attempts=120):
+        try:
+            status = self.status()
+            if not status['docker_installed']:
+                raise ValueError('请先安装 Docker Desktop，安装后点击一键准备。')
+            if not status['docker_ready']:
+                self.prepare_phase = 'starting_docker'
+                self._open_desktop()
+                self.prepare_phase = 'waiting_docker'
+                deadline = time.monotonic() + 240
+                for _ in range(attempts):
+                    if time.monotonic() >= deadline:
+                        break
+                    # A cached offline result must not delay or stop the chain.
+                    self.monitor.engine_info(force=True)
+                    status = self.status()
+                    if status['docker_ready']:
+                        break
+                    time.sleep(2)
+                if not status['docker_ready']:
+                    raise ValueError('Docker 仍未就绪。请在 Docker 窗口完成首次启动提示，然后回这里重试。')
+            if status['image_ready']:
+                self.build_state, self.prepare_phase = 'ready', 'ready'
+                self.build_error = None
+                return
+            self.prepare_phase = 'building'
+            self._build_job()
+        except (ValueError,OSError,subprocess.SubprocessError) as exc:
+            self.build_error = str(exc) if isinstance(exc,ValueError) else '准备未能完成，请检查 Docker 是否已正常启动，然后重试。'
+            self.build_state, self.prepare_phase = 'error', 'error'
 
     def _build_job(self):
         log = self.store.data_dir / 'build.log'
@@ -255,7 +295,7 @@ class Runtime(ResourceControls):
                 p = subprocess.run([self.docker, 'build', '-t', IMAGE, str(ROOT / 'runtime')], stdout=output, stderr=subprocess.STDOUT, timeout=1800)
             if p.returncode:
                 raise ValueError('浏览器组件构建失败，可重试；详情见本机 build.log。')
-            self.build_state = 'ready'
+            self.build_state, self.prepare_phase = 'ready', 'ready'
         except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
             self.build_error = str(exc) if isinstance(exc, ValueError) else '构建超时或无法启动，请重试。'
-            self.build_state = 'error'
+            self.build_state, self.prepare_phase = 'error', 'error'
