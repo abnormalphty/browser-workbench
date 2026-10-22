@@ -7,7 +7,7 @@
 ## 需要准备
 
 - macOS，Python 3.11 或更新版本。
-- 已安装并启动的 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
+- 已安装的 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
 - 首次安装能访问 Python 软件源、Debian 软件源、Docker 镜像源及 GitHub 发布文件的网络。
 - 足够的磁盘空间和 Docker 内存；浏览器镜像为数 GB，默认每个环境最多 2 核 / 2 GB，同时运行上限为 2。
 
@@ -18,9 +18,9 @@
 私有仓库需要先接受仓库拥有者的邀请，并用被邀请的 GitHub 账号登录。
 
 1. 点击仓库 **Code → Download ZIP**，解压到自己常用的目录。
-2. 安装 Python 3.11+ 并打开 Docker Desktop，等待 Docker 就绪。
+2. 安装 Python 3.11+ 和 Docker Desktop。工作台会自动打开 Docker 并等待就绪；Docker 的首次启动提示仍需在其窗口完成。
 3. 双击目录内的 **启动工作台.command**。也可在这个目录的终端执行 `python3 launch.py`。
-4. 首次启动会在项目目录建立 `.venv`、安装依赖；网页中的“运行组件”会准备浏览器镜像。首次准备可能需要数分钟。
+4. 首次启动会在项目目录建立 `.venv`、安装依赖，自动等待 Docker 就绪并准备浏览器镜像。页面会显示当前阶段，失败后可点“一键准备”重试；首次准备可能需要数分钟。
 5. 日后仍从同一目录启动；面板地址为 [http://127.0.0.1:8766](http://127.0.0.1:8766)。
 
 如果双击文件没有运行权限，可在该目录执行 `chmod +x 启动工作台.command`，或直接运行 `python3 launch.py`。如系统提示 Python 版本过低，请安装新版 Python 后再启动。
@@ -89,3 +89,10 @@ docker build -t local-browser-workbench:0.6 runtime
 ```
 
 项目结构及验证范围见 [架构说明](docs/ARCHITECTURE.md) 和 [验证说明](docs/TESTING.md)。常见问题见 [安装排查](docs/SETUP.md)。第三方项目及许可边界见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
+
+## v0.6.1 首次准备改进
+
+Docker 已安装时，工作台把“启动 Docker → 等待就绪 → 准备浏览器组件”串成一次操作；已有组件会直接复用。Docker 未就绪时不再立即构建失败。页面显示正在等待还是正在准备，超时后可重试。首次启动 Docker 的条款或系统确认仍需使用者自行完成。
+
+此版本未自动修改 Docker 的代理、镜像源、CPU 或内存设置；如果下载或启动仍失败，应按实际错误排查。不要将此改动视为已验证所有内测电脑的网络与资源配置。

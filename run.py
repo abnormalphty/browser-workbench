@@ -3,7 +3,6 @@ import argparse
 import os
 from pathlib import Path
 import threading
-import time
 import webbrowser
 
 import uvicorn
@@ -19,20 +18,7 @@ def main():
     os.umask(0o077)
     app = create_app()
     if args.prepare:
-        def prepare():
-            import subprocess
-            runtime = app.state.runtime
-            if not runtime.status()['docker_installed']:
-                return
-            subprocess.Popen(['open','-a','Docker'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            for _ in range(120):
-                status = runtime.status()
-                if status['docker_ready']:
-                    if not status['image_ready']:
-                        runtime.build()
-                    return
-                time.sleep(2)
-        threading.Thread(target=prepare, daemon=True).start()
+        app.state.runtime.build()
     if not args.no_open:
         threading.Timer(1.5, lambda:webbrowser.open(f'http://127.0.0.1:{args.port}')).start()
     uvicorn.run(app, host='127.0.0.1', port=args.port, access_log=False, proxy_headers=False)
