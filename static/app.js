@@ -23,7 +23,7 @@ const icon = name => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="t
 function paintIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{e.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${paths[e.dataset.icon]||paths.grid}</svg>`;e.removeAttribute('data-icon');});}
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state = {environments:[],nodes:[],subscription:{},runtime:{}};
-let currentPage='environments', editingId=null, activeId=null, pendingOpen=null, refreshing=false, toastTimer=null;
+let currentPage='environments', editingId=null, activeId=null, pendingOpen=null, refreshing=false, toastTimer=null, preparationAttempted=false;
 
 async function api(path, options={}){
   const {method='GET', body} = options;
@@ -39,15 +39,18 @@ function hideDialog(id){$(id).close();}
 function updateRuntime(){
   const r=state.runtime;
   const ready=r.docker_ready&&r.image_ready;
-  $('sidebarStatus').textContent=ready?'运行组件已就绪':r.build_state==='building'?'正在准备浏览器组件':r.docker_ready?'浏览器组件待准备':'运行组件未就绪';
+  const phases={checking:'正在检查运行组件',starting_docker:'正在打开 Docker',waiting_docker:'等待 Docker 就绪',building:'正在准备浏览器组件'};
+  const preparing=r.build_state==='building';
+  const phaseTitle=phases[r.prepare_phase]||'正在准备运行组件';
+  $('sidebarStatus').textContent=ready?'运行组件已就绪':preparing?phaseTitle:r.docker_ready?'浏览器组件待准备':'运行组件未就绪';
   $('sidebarDot').className='dot '+(ready?'green':'amber');
   $('setupBanner').hidden=ready;
-  $('setupTitle').textContent=r.build_state==='building'?'正在准备浏览器组件':r.build_state==='error'?'组件准备需要重试':r.docker_ready?'还差一步，准备浏览器组件':'首次使用，准备运行组件';
-  $('setupDescription').textContent=r.build_state==='building'?'正在下载和安装浏览器，首次准备需要一些时间。':r.build_error||'准备一次，之后只需导入订阅、创建环境。';
+  $('setupTitle').textContent=preparing?phaseTitle:r.build_state==='error'?'组件准备需要重试':r.docker_ready?'还差一步，准备浏览器组件':'首次使用，准备运行组件';
+  $('setupDescription').textContent=preparing?(r.prepare_phase==='waiting_docker'?'如果 Docker 弹出首次启动提示，请在它的窗口完成；完成后工作台会自动继续。':r.prepare_phase==='building'?'正在自动准备浏览器组件，首次下载需要一些时间。':'工作台会自动启动后台服务，再继续准备浏览器组件。'):r.build_error||'点击一键准备，自动完成后台启动与浏览器组件准备。';
   $('runtimeChecklist').innerHTML=[['本机运行服务',r.docker_installed?'已安装':'待安装'],['后台运行状态',r.docker_ready?'已启动':'未启动'],['浏览器与画面组件',r.image_ready?'已就绪':r.build_state==='building'?'准备中…':'待准备']].map(([title,value])=>`<div class="runtime-check">${title}<span>${value}</span></div>`).join('');
   $('runtimeError').hidden=!r.build_error;$('runtimeError').textContent=r.build_error||'';
   $('runtimePrimary').disabled=r.build_state==='building';
-  $('runtimePrimary').textContent=ready?'组件已就绪':!r.docker_installed?'查看安装说明':!r.docker_ready?'启动运行服务':r.build_state==='building'?'正在准备…':'准备浏览器组件';
+  $('runtimePrimary').textContent=ready?'组件已就绪':!r.docker_installed?'查看安装说明':preparing?'正在准备…':r.build_state==='error'?'重试一键准备':'一键准备运行组件';
 }
 function renderEnvironments(){
   const all=state.environments, query=$('environmentSearch').value.trim().toLowerCase();
@@ -104,6 +107,7 @@ async function refresh(){
   if(refreshing)return;refreshing=true;
   try{
     state=await api('state');renderEnvironments();renderNodes();updateRuntime();renderInformation();
+    if(!preparationAttempted&&state.runtime.docker_installed&&!state.runtime.image_ready&&state.runtime.build_state==='idle'){preparationAttempted=true;await api('runtime/prepare',{method:'POST'});}
     if(activeId){const e=state.environments.find(e=>e.id===activeId);if(e?.runtime.url&&document.activeElement!==$('browserAddress'))$('browserAddress').value=e.runtime.url.startsWith('file:')?'':e.runtime.url;}
     if(pendingOpen){const e=state.environments.find(e=>e.id===pendingOpen);if(e?.runtime.status==='running'){pendingOpen=null;await openBrowser(e.id);}else if(e?.runtime.status==='error'){pendingOpen=null;toast(e.runtime.error||'环境未能启动。',true);}}
   }catch(e){toast(e.message,true);}finally{refreshing=false;}
@@ -178,7 +182,7 @@ $('refreshSubscription').onclick=async()=>{try{$('refreshSubscription').disabled
 $('toggleUrl').onclick=()=>$('subscriptionUrl').type=$('subscriptionUrl').type==='password'?'text':'password';
 $('runtimeButton').onclick=$('setupAction').onclick=()=>{updateRuntime();showDialog('runtimeDialog');};
 $('runtimePrimary').onclick=async()=>{
-  try{const r=state.runtime;if(!r.docker_installed){window.open('https://docs.docker.com/desktop/setup/install/mac-install/','_blank','noopener,noreferrer');return;}if(!r.docker_ready){await api('runtime/open',{method:'POST'});toast('正在启动本机运行服务。');}else if(!r.image_ready){await api('runtime/prepare',{method:'POST'});toast('已开始准备浏览器组件。');}else{hideDialog('runtimeDialog');}await refresh();}catch(e){toast(e.message,true);}
+  try{const r=state.runtime;if(!r.docker_installed){window.open('https://docs.docker.com/desktop/setup/install/mac-install/','_blank','noopener,noreferrer');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
 };
 $('exitBrowser').onclick=()=>{$('browserView').hidden=true;$('browserFrame').src='about:blank';activeId=null;document.body.style.overflow='';refresh();};
 $('reconnectBrowser').onclick=async()=>{try{await openBrowser(activeId);}catch(e){toast(e.message,true);}};
