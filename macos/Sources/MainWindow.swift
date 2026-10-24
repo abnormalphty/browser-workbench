@@ -33,8 +33,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         webView = WKWebView(frame: .zero, configuration: configuration)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "境工作台"
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.title = "Browser Workbench"
+        // A transparent, unified 52 pt title bar: the page's sidebar and top band run under it
+        // (style.css reserves that band in html.native-app), and the band still drags the window.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        let toolbar = NSToolbar(identifier: "MainToolbar")
+        toolbar.allowsUserCustomization = false
+        if #available(macOS 15.0, *) { toolbar.allowsDisplayModeCustomization = false }
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
+        window.backgroundColor = Self.pageBackground
         window.minSize = NSSize(width: 960, height: 620)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
@@ -50,12 +62,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        webView.underPageBackgroundColor = Self.pageBackground
         if #available(macOS 13.3, *) {
             webView.isInspectable = UserDefaults.standard.bool(forKey: "WebInspector")
         }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Same as --bg in style.css, so nothing flashes white before the page paints.
+    static let pageBackground = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 0x19 / 255, green: 0x1c / 255, blue: 0x1b / 255, alpha: 1)
+            : NSColor(srgbRed: 0xf5 / 255, green: 0xf6 / 255, blue: 0xf5 / 255, alpha: 1)
+    }
 
     // MARK: Pages
 
@@ -169,12 +189,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
             guard let name = body["name"] as? String, name.range(of: "^[a-z0-9-]{1,40}$", options: .regularExpression) != nil else {
                 return replyHandler(nil, "bad request")
             }
-            webView.takeSnapshot(with: nil) { image, _ in
+            windowSnapshot { image in
                 if let tiff = image?.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
                     try? png.write(to: output.appendingPathComponent(name + ".png"))
                 }
                 replyHandler(["ok": image != nil], nil)
             }
+        case "test.appearance":
+            NSApp.appearance = NSAppearance(named: body["mode"] as? String == "dark" ? .darkAqua : .aqua)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { replyHandler(["ok": true], nil) }
         case "test.quit":
             replyHandler(["ok": true], nil)
             (NSApp.delegate as? AppDelegate)?.quitForTest(stopEnvironments: body["stopEnvironments"] as? Bool ?? false)
@@ -296,6 +319,27 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         }
     }
 
+    /// The page plus the native title-bar buttons drawn over it, as the user sees the window.
+    private func windowSnapshot(completion: @escaping (NSImage?) -> Void) {
+        webView.takeSnapshot(with: nil) { [weak self] page, _ in
+            guard let self, let page, let window = self.window else { return completion(page) }
+            let size = self.webView.bounds.size
+            let image = NSImage(size: size)
+            image.lockFocus()
+            page.draw(in: NSRect(origin: .zero, size: size))
+            if let titlebar = window.standardWindowButton(.closeButton)?.superview?.superview,
+               let rep = titlebar.bitmapImageRepForCachingDisplay(in: titlebar.bounds) {
+                titlebar.cacheDisplay(in: titlebar.bounds, to: rep)
+                let chrome = NSImage(size: titlebar.bounds.size)
+                chrome.addRepresentation(rep)
+                // Window coordinates (bottom-left origin) match the image; the web view itself is flipped.
+                chrome.draw(in: titlebar.convert(titlebar.bounds, to: nil))
+            }
+            image.unlockFocus()
+            completion(image)
+        }
+    }
+
     /// Same priority as the page's own clipboard code: an image first, then text.
     private func readPasteboard(_ pasteboard: NSPasteboard) -> [String: Any] {
         var result: [String: Any] = [:]
@@ -339,14 +383,16 @@ enum StatusPage {
             : "<div class=spinner></div>"
         return """
         <!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>
-        :root{color-scheme:light}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7f4;color:#203a33;
+        :root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f6f5;color:#18241f;
         font:15px -apple-system,"PingFang SC",sans-serif}.card{text-align:center;max-width:460px;padding:40px}
         .mark{width:64px;height:64px;margin:0 auto 22px;border-radius:16px;background:#21644e;color:#fff;display:grid;place-items:center;
         font:600 32px "PingFang SC",sans-serif}h1{font-size:20px;font-weight:600;margin:0 0 10px}p{color:#85918a;line-height:1.7;margin:0}
         .spinner{width:22px;height:22px;margin:26px auto 0;border:3px solid #e3e8e1;border-top-color:#21644e;border-radius:50%;
         animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.actions{margin-top:26px;display:flex;gap:10px;justify-content:center}
         a{padding:9px 18px;border-radius:9px;border:1px solid #e3e8e1;color:#203a33;text-decoration:none;background:#fff}
-        a.primary{background:#21644e;border-color:#21644e;color:#fff}</style>
+        a.primary{background:#21644e;border-color:#21644e;color:#fff}
+        @media(prefers-color-scheme:dark){body{background:#191c1b;color:#e8edea}p{color:#8d9792}.spinner{border-color:#2c3230;border-top-color:#6fcca4}
+        a{background:#232827;border-color:rgba(255,255,255,.12);color:#e8edea}a.primary{background:#2a8262;border-color:#2a8262}}</style>
         <div class=card><div class=mark>境</div><h1>\(escape(message))</h1><p>\(escape(detail))</p>\(actions)</div></html>
         """
     }

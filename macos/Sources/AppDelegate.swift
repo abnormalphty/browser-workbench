@@ -153,14 +153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return entry
         }
         let hideOthers = item("隐藏其他", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option])
-        submenu("境工作台", [
-            item("关于境工作台", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+        submenu("Browser Workbench", [
+            item("关于 Browser Workbench", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
             .separator(),
-            item("隐藏境工作台", #selector(NSApplication.hide(_:)), "h"),
+            item("隐藏 Browser Workbench", #selector(NSApplication.hide(_:)), "h"),
             hideOthers,
             item("全部显示", #selector(NSApplication.unhideAllApplications(_:))),
             .separator(),
-            item("退出境工作台", #selector(NSApplication.terminate(_:)), "q"),
+            item("退出 Browser Workbench", #selector(NSApplication.terminate(_:)), "q"),
         ])
         submenu("文件", [
             item("导入旧版工作台数据…", #selector(importLegacyData(_:))),
@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item("最小化", #selector(NSWindow.performMiniaturize(_:)), "m"),
             item("缩放", #selector(NSWindow.performZoom(_:))),
             .separator(),
-            item("境工作台", #selector(showWindow(_:)), "1"),
+            item("Browser Workbench", #selector(showWindow(_:)), "1"),
         ]
         submenu("窗口", windowMenuItems)
         NSApp.windowsMenu = main.items.last?.submenu

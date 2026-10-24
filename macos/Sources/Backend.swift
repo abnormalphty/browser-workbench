@@ -111,7 +111,7 @@ final class Backend {
             return
         }
         guard fm.isExecutableFile(atPath: AppPaths.python.path) else {
-            state = .failed("应用内的运行组件不完整，请重新安装境工作台。")
+            state = .failed("应用内的运行组件不完整，请重新安装 Browser Workbench。")
             return
         }
         openLog()
@@ -244,7 +244,7 @@ final class Backend {
         if wasStopping {
             state = .stopped
         } else if lockedOut {
-            state = .failed("另一个境工作台正在使用同一个数据文件夹。请先退出另一个窗口或副本（例如仍在磁盘映像里运行的那个），再点重试。")
+            state = .failed("另一个 Browser Workbench 正在使用同一个数据文件夹。请先退出另一个窗口或副本（例如仍在磁盘映像里运行的那个），再点重试。")
         } else {
             state = .failed("后台服务意外停止（代码 \(status)）。浏览器环境不受影响，可以点重试重新连接。")
         }
@@ -268,7 +268,7 @@ final class Backend {
         }
         log = try? FileHandle(forWritingTo: url)
         _ = try? log?.seekToEnd()
-        writeLog(Data("\n--- \(Date()) 境工作台 \(AppPaths.version) ---\n".utf8))
+        writeLog(Data("\n--- \(Date()) Browser Workbench \(AppPaths.version) ---\n".utf8))
     }
 
     private func writeLog(_ data: Data) {

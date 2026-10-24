@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Wrap a built app into a drag-to-install DMG.
-# Usage: scripts/make_dmg.sh [arm64|x86_64]   → dist/境工作台-VERSION-ARCH.dmg
+# Usage: scripts/make_dmg.sh [arm64|x86_64]   → dist/Browser-Workbench-VERSION-ARCH.dmg
 set -euo pipefail
 cd -- "${0:A:h}/.."
 # Build outputs live outside the project: ~/Documents is synced by iCloud Drive,
@@ -9,10 +9,10 @@ BUILD=${BUILD_ROOT:-$HOME/Library/Caches/BrowserWorkbenchBuild}
 
 ARCH=${1:-$(uname -m)}
 VERSION=$(sed -n "s/^__version__ = '\(.*\)'/\1/p" workbench/__init__.py)
-APP_NAME=境工作台
+APP_NAME="Browser Workbench"
 APP=$BUILD/app/$ARCH/$APP_NAME.app
 STAGE=$BUILD/dmg/$ARCH
-DMG=dist/$APP_NAME-$VERSION-$ARCH.dmg
+DMG=dist/${APP_NAME// /-}-$VERSION-$ARCH.dmg
 [[ -d $APP ]] || { echo "build the app first: scripts/build_app.sh $ARCH" >&2; exit 1; }
 codesign --verify --deep --strict "$APP"
 

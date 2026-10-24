@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Assemble 境工作台.app: Swift shell + bundled Python + backend + (optional) browser image.
+# Assemble Browser Workbench.app: Swift shell + bundled Python + backend + (optional) browser image.
 # Usage: scripts/build_app.sh [arm64|x86_64] [--with-image $BUILD/runtime-image/browser-runtime-ARCH.tar.gz]
 # Signs ad hoc unless SIGN_IDENTITY names a Developer ID certificate.
 set -euo pipefail
@@ -19,7 +19,7 @@ while (( $# )); do
 done
 HOST_ARCH=$(uname -m)
 VERSION=$(sed -n "s/^__version__ = '\(.*\)'/\1/p" workbench/__init__.py)
-APP_NAME=境工作台
+APP_NAME="Browser Workbench"
 APP=$BUILD/app/$ARCH/$APP_NAME.app
 C=$APP/Contents
 R=$C/Resources

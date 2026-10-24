@@ -1,11 +1,11 @@
 # Mac 应用（v0.7）的结构与取舍
 
-v0.7 把原来“在浏览器里打开 http://127.0.0.1:8766”的工作台，做成可以从 DMG 安装、双击打开的独立 Mac 应用 **境工作台.app**。浏览器环境本身的实现（Docker 容器里的标准 Firefox + mihomo + noVNC）没有改变。
+v0.7 把原来“在浏览器里打开 http://127.0.0.1:8766”的工作台，做成可以从 DMG 安装、双击打开的独立 Mac 应用 **Browser Workbench.app**。浏览器环境本身的实现（Docker 容器里的标准 Firefox + mihomo + noVNC）没有改变。
 
 ## 组成
 
 ```
-境工作台.app/Contents/
+Browser Workbench.app/Contents/
   MacOS/BrowserWorkbench        Swift 原生外壳（AppKit + WKWebView），约 0.3 MB
   Resources/python/             自带的 CPython 3.12（python-build-standalone）及固定版本依赖
   Resources/backend/            工作台后端（workbench/）、界面（static/）、容器构建文件（runtime/）
@@ -49,6 +49,12 @@ v0.7 把原来“在浏览器里打开 http://127.0.0.1:8766”的工作台，�
 - ⌘Q：若有环境在运行，会询问“停止环境并退出 / 保留运行并退出 / 取消”。停止会正常关闭 Firefox 以写盘（和单个环境的“停止”相同）。
 - 注销、重启、关机：不弹询问，直接正常停止环境后退出。
 - 保留运行时，环境容器继续在 Docker 中占用内存；下次打开应用会自动识别并可继续使用。
+
+## 外观
+
+- 窗口使用透明的统一标题栏（52 pt）：页面的侧栏和顶栏延伸到标题栏下面，红绿灯按钮位于侧栏顶部，顶栏区域仍可拖动窗口。网页里 `html.native-app` 会为这条带预留空间，交互控件都不放在里面。
+- 颜色全部是 `static/style.css` 顶部的变量，按 `prefers-color-scheme` 切换浅色 / 深色，跟随系统设置。
+- 设计检查：`tests/ui/run_screens.sh` 用 `tests/ui/seed_demo.py` 生成的假数据，在真实应用窗口里截取每个页面、弹窗和浏览器画面的浅色 / 深色图（截图包含标题栏按钮）。
 
 ## 原生桥接
 

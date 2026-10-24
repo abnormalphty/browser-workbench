@@ -32,7 +32,7 @@ class DesktopServer(uvicorn.Server):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='境工作台后台服务')
+    parser = argparse.ArgumentParser(description='Browser Workbench backend')
     parser.add_argument('--data-dir', required=True)
     parser.add_argument('--port', type=int, default=0, help='0 picks a free loopback port')
     parser.add_argument('--exit-on-stdin-eof', action='store_true')

@@ -13,9 +13,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>境工作台</string>
+	<string>Browser Workbench</string>
 	<key>CFBundleDisplayName</key>
-	<string>境工作台</string>
+	<string>Browser Workbench</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -27,3 +27,6 @@ dist/
 
 # Personal handoff record: describes this Mac's own data, folders and environments
 docs/HANDOFF.md
+
+# Local preview settings (contain this Mac's paths)
+.claude/

@@ -23,6 +23,15 @@ const paths = {
   close:'<path d="m6 6 12 12M6 18 18 6"/>',
   edit:'<path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14Z"/>',
   trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
+  back:'<path d="M19 12H5m6-6-6 6 6 6"/>',
+  'chevron-left':'<path d="m15 6-6 6 6 6"/>',
+  'chevron-right':'<path d="m9 6 6 6-6 6"/>',
+  clipboard:'<path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><rect x="9" y="2.5" width="6" height="3.5" rx="1"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/>',
+  files:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 13h6m-2-2 2 2-2 2"/>',
+  keyboard:'<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01m3.5 0h.01m3.5 0h.01m3.5 0h.01M7.5 14h9"/>',
+  reconnect:'<path d="M3 12a9 9 0 0 1 15.5-6.3L21 8m0-5v5h-5m5 4a9 9 0 0 1-15.5 6.3L3 16m0 5v-5h5"/>',
+  sliders:'<path d="M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
 };
 const icon = name => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.grid}</svg></span>`;
 function paintIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{e.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${paths[e.dataset.icon]||paths.grid}</svg>`;e.removeAttribute('data-icon');});}

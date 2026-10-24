@@ -1,8 +1,8 @@
 #!/bin/zsh
-# End-to-end smoke test of a built 境工作台.app with disposable data.
+# End-to-end smoke test of a built Browser Workbench.app with disposable data.
 # Launches the app through LaunchServices (like a double-click), runs tests/ui/app_smoke.js
 # inside its window, then checks quit, the backend, the container and the files on disk.
-# Usage: tests/ui/run_app_smoke.sh PATH/TO/境工作台.app
+# Usage: tests/ui/run_app_smoke.sh "PATH/TO/Browser Workbench.app"
 # Needs Docker. Uses the Mac clipboard during the run (restores its text afterwards).
 set -uo pipefail
 cd -- "${0:A:h}/../.."
