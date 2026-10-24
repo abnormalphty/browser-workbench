@@ -12,14 +12,17 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 import httpx
 
+from . import __version__
 from .runtime import ROOT, Runtime
 from .store import Store
 from .transfers import Transfers, MAX_UPLOAD
 from .subscriptions import fetch_subscription, parse_subscription
 
 
-def create_app(data_dir: Path | None = None):
+def create_app(data_dir: Path | None = None, control_token: str | None = None):
     data_dir = data_dir or Path(os.environ.get('WORKBENCH_DATA_DIR', ROOT / 'data'))
+    # The Mac app talks to /control/ with its own secret, never via the page.
+    control_token = control_token or os.environ.get('WORKBENCH_CONTROL_TOKEN') or None
     store = Store(data_dir)
     runtime = Runtime(store)
     token = secrets.token_urlsafe(32)
@@ -29,6 +32,11 @@ def create_app(data_dir: Path | None = None):
 
     @app.middleware('http')
     async def protect(request, call_next):
+        if request.url.path.startswith('/control/'):
+            # Native callers send no Origin; a page that learnt the secret still cannot.
+            if not control_token or request.headers.get('origin') or not secrets.compare_digest(request.headers.get('X-Workbench-Control', ''), control_token):
+                return JSONResponse({'error':'forbidden'}, status_code=403)
+            return await call_next(request)
         try:
             upload = request.method == 'POST' and re.fullmatch(r'/api/environments/[a-f0-9]{32}/files/upload', request.url.path)
             limit = MAX_UPLOAD if upload else 65536
@@ -96,11 +104,24 @@ def create_app(data_dir: Path | None = None):
 
     @app.get('/health')
     def health():
-        return {'app':'browser-workbench', 'version':'0.6.1'}
+        return {'app':'browser-workbench', 'version':__version__}
+
+    @app.get('/control/summary')
+    def control_summary():
+        objects = runtime.active_objects()
+        starting = [key for key, job in list(runtime.jobs.items()) if job.is_alive()]
+        names = {env['id']:env['name'] for env in store.list_environments()}
+        return {'running':sum(not o['State'].get('Paused') for o in objects.values()), 'paused':sum(bool(o['State'].get('Paused')) for o in objects.values()),
+                'starting':len(set(starting)-set(objects)), 'names':[names[i] for i in sorted(set(objects)|set(starting)) if i in names]}
+
+    @app.post('/control/stop-all')
+    def control_stop_all():
+        return runtime.stop_all()
 
     @app.get('/api/state')
     def state():
         result = store.public_state()
+        result['app'] = {'version':__version__, 'mode':os.environ.get('WORKBENCH_MODE', 'source')}
         result['runtime'] = runtime.status()
         from .geography import PLACES
         result['geography'] = {'progress':dict(runtime.geography.progress),'places':list(PLACES.values())}

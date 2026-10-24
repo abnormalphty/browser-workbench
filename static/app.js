@@ -1,6 +1,11 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="workbench-token"]').content;
+// Inside the Mac app, clipboard, links and downloads use native code instead of
+// browser permission prompts; in a normal browser this stays null.
+const native = window.webkit?.messageHandlers?.workbench && window.workbenchNative ? {call:(type,data={})=>window.webkit.messageHandlers.workbench.postMessage({type,...data})} : null;
+if(native)document.documentElement.classList.add('native-app');
+function openExternal(url){if(native)native.call('openExternal',{url}).catch(()=>{});else window.open(url,'_blank','noopener,noreferrer');}
 const paths = {
   grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>',
@@ -23,7 +28,7 @@ const icon = name => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="t
 function paintIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{e.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${paths[e.dataset.icon]||paths.grid}</svg>`;e.removeAttribute('data-icon');});}
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state = {environments:[],nodes:[],subscription:{},runtime:{}};
-let currentPage='environments', editingId=null, activeId=null, pendingOpen=null, refreshing=false, toastTimer=null, preparationAttempted=false;
+let currentPage='environments', editingId=null, activeId=null, pendingOpen=null, refreshing=false, toastTimer=null, preparationAttempted=false, previousRuntime=null;
 
 async function api(path, options={}){
   const {method='GET', body} = options;
@@ -32,25 +37,30 @@ async function api(path, options={}){
   if(!response.ok) throw new Error(data.error||data.detail||'操作没有完成，请重试。');
   return data;
 }
-function toast(message,error=false){$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,5500);}
+// An open modal dialog sits in the top layer above any z-index, so the toast joins it there.
+function toast(message,error=false,action=null){const t=$('toast'),host=[...document.querySelectorAll('dialog[open]')].pop()||document.body;if(t.parentElement!==host)host.append(t);t.textContent=message;if(action){const b=document.createElement('button');b.className='toast-action';b.textContent=action.label;b.onclick=()=>{t.hidden=true;action.run();};t.append(b);}t.classList.toggle('error',error);t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,action?9000:5500);}
 function setPage(page){currentPage=page;$('environmentPage').hidden=page!=='environments';$('nodesPage').hidden=page!=='nodes';$('informationPage').hidden=page!=='information';$('breadcrumbCurrent').textContent=page==='nodes'?'订阅与线路':page==='information'?'账号与资源':'浏览器环境';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===page));}
 function showDialog(id){if(!$(id).open)$(id).showModal();}
 function hideDialog(id){$(id).close();}
 function updateRuntime(){
   const r=state.runtime;
   const ready=r.docker_ready&&r.image_ready;
-  const phases={checking:'正在检查运行组件',starting_docker:'正在打开 Docker',waiting_docker:'等待 Docker 就绪',building:'正在准备浏览器组件'};
+  const engine=r.engine_app||'Docker';
+  const phases={checking:'正在检查运行组件',starting_docker:`正在打开 ${engine}`,waiting_docker:`等待 ${engine} 就绪`,loading_image:'正在载入浏览器组件',building:'正在准备浏览器组件'};
   const preparing=r.build_state==='building';
-  const phaseTitle=phases[r.prepare_phase]||'正在准备运行组件';
-  $('sidebarStatus').textContent=ready?'运行组件已就绪':preparing?phaseTitle:r.docker_ready?'浏览器组件待准备':'运行组件未就绪';
+  const progress=r.prepare_phase==='loading_image'&&r.prepare_progress!=null?` ${r.prepare_progress}%`:'';
+  const phaseTitle=(phases[r.prepare_phase]||'正在准备运行组件')+progress;
+  $('sidebarStatus').textContent=ready?'运行组件已就绪':preparing?phaseTitle:!r.docker_installed?'需要安装 Docker':r.docker_ready?'浏览器组件待准备':'运行组件未就绪';
   $('sidebarDot').className='dot '+(ready?'green':'amber');
   $('setupBanner').hidden=ready;
-  $('setupTitle').textContent=preparing?phaseTitle:r.build_state==='error'?'组件准备需要重试':r.docker_ready?'还差一步，准备浏览器组件':'首次使用，准备运行组件';
-  $('setupDescription').textContent=preparing?(r.prepare_phase==='waiting_docker'?'如果 Docker 弹出首次启动提示，请在它的窗口完成；完成后工作台会自动继续。':r.prepare_phase==='building'?'正在自动准备浏览器组件，首次下载需要一些时间。':'工作台会自动启动后台服务，再继续准备浏览器组件。'):r.build_error||'点击一键准备，自动完成后台启动与浏览器组件准备。';
-  $('runtimeChecklist').innerHTML=[['本机运行服务',r.docker_installed?'已安装':'待安装'],['后台运行状态',r.docker_ready?'已启动':'未启动'],['浏览器与画面组件',r.image_ready?'已就绪':r.build_state==='building'?'准备中…':'待准备']].map(([title,value])=>`<div class="runtime-check">${title}<span>${value}</span></div>`).join('');
+  $('setupTitle').textContent=preparing?phaseTitle:!r.docker_installed?'首次使用，先安装 Docker Desktop':r.build_state==='error'?'组件准备需要重试':r.docker_ready?'还差一步，准备浏览器组件':'首次使用，准备运行组件';
+  $('setupDescription').textContent=preparing?(r.prepare_phase==='waiting_docker'?`如果 ${engine} 弹出首次使用提示（服务条款等，登录可跳过），请在它的窗口完成；完成后工作台会自动继续。`:r.prepare_phase==='loading_image'?'正在把应用自带的浏览器组件载入 Docker。只需一次，不用联网下载。':r.prepare_phase==='building'?'正在联网准备浏览器组件，首次下载需要一些时间。':'工作台会自动启动后台服务，再继续准备浏览器组件。'):!r.docker_installed?'浏览器环境运行在 Docker 里。点“查看状态”按步骤安装，装好后回到这里会自动继续。':r.build_error||'点击一键准备，自动完成后台启动与浏览器组件准备。';
+  const memory=state.resources?.engine?.memory_mb;
+  $('runtimeChecklist').innerHTML=[['Docker',r.docker_installed?(r.engine_app||'已安装'):'待安装'],['后台运行状态',r.docker_ready?'已启动':'未启动'],['浏览器与画面组件',r.image_ready?'已就绪':preparing&&['loading_image','building'].includes(r.prepare_phase)?'准备中…'+progress:'待准备'],...(r.docker_ready&&memory?[['Docker 可分配内存',`${gigabytes(memory)} · 约可同时运行 ${Math.max(1,Math.floor((memory-512)/2048))} 个 2 GB 环境`]]:[])].map(([title,value])=>`<div class="runtime-check">${title}<span>${esc(value)}</span></div>`).join('');
+  $('runtimeInstall').hidden=r.docker_installed;
   $('runtimeError').hidden=!r.build_error;$('runtimeError').textContent=r.build_error||'';
-  $('runtimePrimary').disabled=r.build_state==='building';
-  $('runtimePrimary').textContent=ready?'组件已就绪':!r.docker_installed?'查看安装说明':preparing?'正在准备…':r.build_state==='error'?'重试一键准备':'一键准备运行组件';
+  $('runtimePrimary').disabled=preparing;
+  $('runtimePrimary').textContent=ready?'组件已就绪':!r.docker_installed?'下载 Docker Desktop':preparing?'正在准备…':r.build_state==='error'?'重试一键准备':'一键准备运行组件';
 }
 function renderEnvironments(){
   const all=state.environments, query=$('environmentSearch').value.trim().toLowerCase();
@@ -108,6 +118,10 @@ async function refresh(){
   try{
     state=await api('state');renderEnvironments();renderNodes();updateRuntime();renderInformation();
     if(!preparationAttempted&&state.runtime.docker_installed&&!state.runtime.image_ready&&state.runtime.build_state==='idle'){preparationAttempted=true;await api('runtime/prepare',{method:'POST'});}
+    // Docker installed or finished its first start after preparation gave up: continue by itself.
+    const was=previousRuntime,now=state.runtime;previousRuntime=now;
+    if(was&&!now.image_ready&&now.build_state==='error'&&((!was.docker_installed&&now.docker_installed)||(!was.docker_ready&&now.docker_ready))){await api('runtime/prepare',{method:'POST'});}
+    if(state.app)$('versionLabel').textContent='v'+state.app.version;
     if(activeId){const e=state.environments.find(e=>e.id===activeId);if(e?.runtime.url&&document.activeElement!==$('browserAddress'))$('browserAddress').value=e.runtime.url.startsWith('file:')?'':e.runtime.url;}
     if(pendingOpen){const e=state.environments.find(e=>e.id===pendingOpen);if(e?.runtime.status==='running'){pendingOpen=null;await openBrowser(e.id);}else if(e?.runtime.status==='error'){pendingOpen=null;toast(e.runtime.error||'环境未能启动。',true);}}
   }catch(e){toast(e.message,true);}finally{refreshing=false;}
@@ -182,7 +196,7 @@ $('refreshSubscription').onclick=async()=>{try{$('refreshSubscription').disabled
 $('toggleUrl').onclick=()=>$('subscriptionUrl').type=$('subscriptionUrl').type==='password'?'text':'password';
 $('runtimeButton').onclick=$('setupAction').onclick=()=>{updateRuntime();showDialog('runtimeDialog');};
 $('runtimePrimary').onclick=async()=>{
-  try{const r=state.runtime;if(!r.docker_installed){window.open('https://docs.docker.com/desktop/setup/install/mac-install/','_blank','noopener,noreferrer');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
+  try{const r=state.runtime;if(!r.docker_installed){openExternal(r.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。安装并打开后，工作台会自动继续。');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
 };
 $('exitBrowser').onclick=()=>{$('browserView').hidden=true;$('browserFrame').src='about:blank';activeId=null;document.body.style.overflow='';refresh();};
 $('reconnectBrowser').onclick=async()=>{try{await openBrowser(activeId);}catch(e){toast(e.message,true);}};
@@ -242,6 +256,12 @@ async function pasteIntoEnvironment(text,files=[]){
 }
 $('pasteFromComputer').onclick=async()=>{
   try{
+    if(native){
+      const r=await native.call('clipboard.read');
+      if(r.files?.length){await showTransfers();toast('剪贴板里是文件。请把文件拖进画面，或在这里选择文件传入。');return;}
+      if(r.image){await pasteIntoEnvironment('',[new File([Uint8Array.from(atob(r.image),c=>c.charCodeAt(0))],'剪贴板图片.png',{type:'image/png'})]);return;}
+      await pasteIntoEnvironment(r.text||'');return;
+    }
     if(navigator.clipboard?.read){
       const items=await navigator.clipboard.read();
       for(const item of items){
@@ -271,7 +291,7 @@ document.addEventListener('click',async event=>{
   const copy=event.target.closest('[data-copy-file-path]');
   const open=event.target.closest('[data-open-transfer]');
   try{
-    if(copy){await navigator.clipboard.writeText(copy.dataset.copyFilePath);toast('环境路径已复制。在文件窗口按 Ctrl+L，然后粘贴。');}
+    if(copy){await (native?native.call('clipboard.writeText',{text:copy.dataset.copyFilePath}):navigator.clipboard.writeText(copy.dataset.copyFilePath));toast('环境路径已复制。在文件窗口按 Ctrl+L，然后粘贴。');}
     if(open){await api(`environments/${activeId}/files/open`,{method:'POST',body:{kind:open.dataset.openTransfer}});}
   }catch(e){transferMessage(e.message,true);}
 });
@@ -282,6 +302,21 @@ window.addEventListener('message',event=>{
   pasteIntoEnvironment(text,files).catch(e=>toast(e.message,true));
 });
 setInterval(()=>{if($('filesDialog').open)refreshFiles().catch(()=>{});},4000);
+// A file dropped anywhere must never navigate away from the workbench; while an
+// environment is open it is sent there, like a paste. The transfer dialog's
+// own drop area handles its drops itself.
+document.addEventListener('dragover',event=>{if(event.dataTransfer?.types?.includes('Files'))event.preventDefault();});
+document.addEventListener('drop',event=>{
+  const files=Array.from(event.dataTransfer?.files||[]);if(!files.length)return;event.preventDefault();
+  if(event.target.closest?.('#fileDrop'))return;
+  if(!activeId){toast('请先打开一个环境，再把文件拖进画面。');return;}
+  pasteIntoEnvironment('',files).catch(e=>toast(e.message,true));
+});
+window.addEventListener('workbench-native-download',event=>{
+  const d=event.detail||{};
+  if(!d.ok){toast(`“${d.name||'文件'}”没有下载完成，请重试。`,true);return;}
+  toast(`已保存到“下载”文件夹：${d.name}`,false,{label:'在 Finder 中显示',run:()=>native?.call('revealFile',{path:d.path}).catch(()=>{})});
+});
 
 const copyRequests=new Map();
 function remoteCopyText(){
@@ -296,6 +331,7 @@ function remoteCopyText(){
 }
 function copyFromEnvironment(){
   const text=remoteCopyText();
+  if(native){text.then(value=>native.call('clipboard.writeText',{text:value})).then(()=>toast('已复制到主电脑，可以在外面按 ⌘V 粘贴。')).catch(e=>toast(e.message,true));return;}
   let write;
   try{
     if(navigator.clipboard?.write&&typeof ClipboardItem!=='undefined'){

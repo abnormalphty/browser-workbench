@@ -11,3 +11,11 @@
 
 
 v0.6.1 准备流程回归：76项自动检查通过，包含模拟 Docker 未启动→等待→准备组件、已有镜像复用、未安装提示和等待超时。真实已启动的Docker和已有镜像验证复用成功，镜像ID未改变，未打开或重建任何用户环境。Docker未启动场景使用模拟回归，未为测试关闭用户Docker。朋友的具体代理/镜像源/资源配置问题尚未取得，不能据此声称其问题已经解决。
+
+
+## v0.7 Mac 应用
+
+- 基础测试：`.venv/bin/python -m unittest discover -s tests`（101 项，含 `tests/test_desktop.py`、`tests/test_migrate.py`）。
+- 容器集成：`tests/integration_runtime.py`（7 项）与 `tests/integration_transfers.py`（5 项），需要已有 `local-browser-workbench:0.7.0` 镜像。
+- 端到端：`tests/ui/run_app_smoke.sh <路径>/境工作台.app`。用 `open -g` 在后台启动应用（不抢键盘），数据目录用临时文件夹（路径含空格），通过开发者变量 `BROWSER_WORKBENCH_UI_TEST` 在应用窗口内运行 `tests/ui/app_smoke.js`，并把截图写到运行目录。检查：原生桥接、自动连上 Docker 与（必要时）载入自带镜像、无 Docker 时的指引显示、Mac 剪贴板→远程网页→Mac 剪贴板、在画面上投放文件（模拟事件）、Firefox 下载经“下载到电脑”逐字节一致、退出时停止环境且应用与后台都退出。运行期间会临时占用 Mac 剪贴板，结束后恢复其中的文字。
+- 不在自动测试范围：真实订阅与 Claude 登录、真人拖放与系统文件面板、退出询问框的按钮、注销 / 关机时的自动停止、全新安装 Docker Desktop、从网上下载后的 Gatekeeper 流程、Intel Mac。

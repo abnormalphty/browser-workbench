@@ -2,7 +2,15 @@ FROM python:3.11-slim-bookworm
 
 ARG TARGETARCH
 ARG MIHOMO_VERSION=v1.19.32
+# Keep in step with RUNTIME_VERSION in workbench/runtime.py.
+LABEL org.opencontainers.image.title="browser-workbench runtime" \
+      org.opencontainers.image.version="0.7.0" \
+      org.opencontainers.image.source="https://github.com/abnormalphty/browser-workbench" \
+      workbench.runtime="0.7.0"
 ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99 PYTHONUNBUFFERED=1 LANG=C.UTF-8
+
+# Mirrors reached through flaky proxies drop connections mid-download; retry.
+RUN printf 'Acquire::Retries "8";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' > /etc/apt/apt.conf.d/80-retries
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl xvfb x11vnc openbox novnc websockify wmctrl \

@@ -63,3 +63,25 @@ document.addEventListener('copy',event=>{
   event.preventDefault();event.stopImmediatePropagation();
   parent.postMessage({type:'workbench-copy-shortcut'},origin);
 },true);
+// Files dragged from Finder onto the remote screen go into this environment,
+// handled by the workbench exactly like a pasted file.
+let dropHint=null,dropHintTimer=null;
+function showDropHint(){
+  if(!dropHint){
+    dropHint=document.createElement('div');
+    dropHint.textContent='松开即可把文件传入这个环境';
+    dropHint.style.cssText='position:fixed;inset:12px;z-index:99999;display:flex;align-items:center;justify-content:center;border:2px dashed #8fd1b5;border-radius:14px;background:#123b2fcc;color:#eef7f1;font:600 16px -apple-system,"PingFang SC",sans-serif;pointer-events:none';
+  }
+  if(!dropHint.isConnected)document.body.append(dropHint);
+  clearTimeout(dropHintTimer);dropHintTimer=setTimeout(()=>dropHint.remove(),180);
+}
+document.addEventListener('dragover',event=>{
+  if(!event.dataTransfer?.types?.includes('Files'))return;
+  event.preventDefault();event.dataTransfer.dropEffect='copy';showDropHint();
+},true);
+document.addEventListener('drop',event=>{
+  const files=Array.from(event.dataTransfer?.files||[]);
+  if(!files.length)return;
+  event.preventDefault();event.stopImmediatePropagation();dropHint?.remove();
+  parent.postMessage({type:'workbench-paste',text:'',files},origin);
+},true);

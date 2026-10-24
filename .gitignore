@@ -20,3 +20,10 @@ __pycache__/
 *.key
 *.p12
 *.pfx
+
+# Build outputs (app bundles, DMGs, downloaded runtimes, exported images)
+build/
+dist/
+
+# Personal handoff record: describes this Mac's own data, folders and environments
+docs/HANDOFF.md

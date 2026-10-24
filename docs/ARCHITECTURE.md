@@ -1,6 +1,12 @@
 # 架构
 
-本机浏览器打开 FastAPI 面板；每个环境对应独立 Docker 容器和绑定的持久 profile。容器包含标准 Firefox、mihomo、Xvfb、Openbox、x11vnc、noVNC 和受令牌保护的 worker。
+FastAPI 面板由 Mac 应用的原生窗口（v0.7 起）或本机浏览器（源码运行）打开；每个环境对应独立 Docker 容器和绑定的持久 profile。容器包含标准 Firefox、mihomo、Xvfb、Openbox、x11vnc、noVNC 和受令牌保护的 worker。Mac 应用的组成与取舍见 [DESKTOP.md](DESKTOP.md)。
+
+- `macos/`：Swift 原生外壳（窗口、菜单、退出流程、剪贴板 / 下载 / 文件选择桥接、旧版数据导入）。
+- `workbench/desktop.py`：应用启动的后台入口（随机回环端口、就绪信号、单实例锁、随应用退出）。
+- `workbench/docker_env.py`：在 Docker Desktop / OrbStack / Homebrew 位置查找 docker 命令。
+- `workbench/migrate.py`：只读复制旧版 `data/` 到应用数据目录。
+- `scripts/`：下载 Python 运行时、导出浏览器镜像、组装签名应用、生成 DMG、隐私检查。
 
 - `launch.py` / `run.py`：本机启动入口，默认监听 127.0.0.1:8766。
 - `workbench/store.py`：SQLite 环境、订阅、账号记录和额度；新安装为空数据库。

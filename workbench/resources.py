@@ -49,7 +49,10 @@ class ResourceMonitor:
   with self.lock:
    if not force and self.sampled_at and time.time()-self.sampled_at<4:return dict(self.metrics)
    env_ids={e['id'] for e in self.runtime.store.list_environments()}
-   names=[self.runtime.container_name(identity) for identity in env_ids]
+   prefix='local-browser-'+self.runtime.scope+'-'
+   # docker stats prints no rows at all if any named container is missing
+   # (e.g. a new, never-started environment), so only ask about started ones.
+   names=[item['Names'] for item in self.runtime.containers() if item.get('Names','').startswith(prefix) and item['Names'][len(prefix):] in env_ids and (item.get('State') in ('running','paused') or '(Paused)' in item.get('Status',''))]
    if not names:self.metrics={};self.sampled_at=time.time();return {}
    try:
     result=self.runtime._run(['stats','--no-stream','--format','{{json .}}',*names],timeout=8,check=False)

@@ -11,8 +11,14 @@ from pathlib import Path
 import httpx
 import yaml
 
-IMAGE = 'local-browser-workbench:0.6'
+from .docker_env import command_env, download_url, engine_app, find_cli
+
+# Bump with runtime/Dockerfile's label whenever files under runtime/ change.
+RUNTIME_VERSION = '0.7.0'
+IMAGE = 'local-browser-workbench:' + RUNTIME_VERSION
 ROOT = Path(__file__).resolve().parent.parent
+# First Docker Desktop start can sit behind its own agreement / sign-in pages.
+ENGINE_WAIT_SECONDS = 600
 
 
 def build_proxy_config(node: dict | None) -> dict:
@@ -34,13 +40,14 @@ from .resources import ResourceControls,ResourceMonitor
 class Runtime(ResourceControls):
     def __init__(self, store):
         self.store = store
-        self.docker = shutil.which('docker') or '/Applications/Docker.app/Contents/Resources/bin/docker'
+        self._docker = None
         self.lock = threading.RLock()
         self.jobs = {}
         self.errors = {}
         self.build_state = 'idle'
         self.build_error = None
         self.prepare_phase = 'idle'
+        self.prepare_progress = None
         self.scope = __import__('hashlib').sha256(str(store.data_dir).encode()).hexdigest()[:12]
         from .geography import Geography
         self.geography = Geography(store,self)
@@ -67,11 +74,24 @@ class Runtime(ResourceControls):
             if str(exc)=='复制文字超过 2 MB，请通过文件传输取回。':raise
             raise ValueError('环境剪贴板暂时无法读取，请在环境内重新复制一次。')
 
+    @property
+    def docker(self):
+        # Re-resolve while missing: Docker may be installed after we started.
+        if not self._docker or not os.path.exists(self._docker):
+            self._docker = find_cli()
+        return self._docker
+
+    def image_archive(self):
+        """Prebuilt image shipped inside the app, so setup needs no registry."""
+        path = os.environ.get('WORKBENCH_IMAGE_ARCHIVE')
+        return path if path and os.path.isfile(path) else None
+
     def _run(self, args: list[str], timeout=20, check=True, input_text=None):
-        if not Path(self.docker).exists():
-            raise ValueError('尚未安装 Docker Desktop，请先完成运行组件准备。')
+        docker = self.docker
+        if not docker:
+            raise ValueError('尚未找到 Docker，请先完成运行组件准备。')
         try:
-            p = subprocess.run([self.docker, *args], capture_output=True, text=True, timeout=timeout, input=input_text)
+            p = subprocess.run([docker, *args], capture_output=True, text=True, timeout=timeout, input=input_text, env=command_env(docker))
         except subprocess.TimeoutExpired as exc:
             raise ValueError('运行服务响应超时，请检查 Docker 是否已启动。') from exc
         if check and p.returncode:
@@ -80,12 +100,13 @@ class Runtime(ResourceControls):
         return p
 
     def status(self):
-        installed=Path(self.docker).exists();info=self.monitor.engine_info() if installed else {}
+        installed=bool(self.docker);info=self.monitor.engine_info() if installed else {}
         image=False
         if info.get('ready'):
             try:image=self._run(['image','inspect',IMAGE],timeout=5,check=False).returncode==0
             except ValueError:pass
-        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'max_running':self.store.resource_settings()['max_running']}
+        app=engine_app()
+        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'prepare_progress':self.prepare_progress,'engine_app':app['name'] if app else None,'image_bundled':bool(self.image_archive()),'docker_download_url':download_url(),'max_running':self.store.resource_settings()['max_running']}
 
     def container_name(self, env_id):
         self.store.valid_id(env_id)
@@ -250,20 +271,23 @@ class Runtime(ResourceControls):
     def _open_desktop(self):
         if __import__('sys').platform != 'darwin':
             raise ValueError('请先启动本机 Docker 服务，再点击一键准备。')
-        result = subprocess.run(['open','-a','Docker'], capture_output=True, timeout=15)
+        app = engine_app()
+        if not app:
+            raise ValueError('已找到 Docker 命令，但它的后台服务没有运行。请先启动你使用的 Docker 服务，再点击重试。')
+        result = subprocess.run(['open','-a',app['path']], capture_output=True, timeout=15)
         if result.returncode:
-            raise ValueError('未能打开 Docker Desktop，请检查它是否已正确安装。')
+            raise ValueError(f"未能打开 {app['name']}，请检查它是否已正确安装。")
 
-    def _prepare_job(self, attempts=120):
+    def _prepare_job(self, attempts=300):
         try:
             status = self.status()
             if not status['docker_installed']:
-                raise ValueError('请先安装 Docker Desktop，安装后点击一键准备。')
+                raise ValueError('请先安装 Docker Desktop。装好并打开后，工作台会自动继续准备。')
             if not status['docker_ready']:
                 self.prepare_phase = 'starting_docker'
                 self._open_desktop()
                 self.prepare_phase = 'waiting_docker'
-                deadline = time.monotonic() + 240
+                deadline = time.monotonic() + ENGINE_WAIT_SECONDS
                 for _ in range(attempts):
                     if time.monotonic() >= deadline:
                         break
@@ -279,11 +303,69 @@ class Runtime(ResourceControls):
                 self.build_state, self.prepare_phase = 'ready', 'ready'
                 self.build_error = None
                 return
+            archive = self.image_archive()
+            if archive:
+                self.prepare_phase = 'loading_image'
+                try:
+                    return self._load_image(archive)
+                except ValueError:
+                    # A damaged archive should not strand the user; building
+                    # from the bundled Dockerfile still works when online.
+                    pass
             self.prepare_phase = 'building'
             self._build_job()
+            if archive and self.build_state == 'error':
+                self.build_error = '内置浏览器组件未能载入，联网构建也没有完成。请重试；详情见本机 build.log。'
         except (ValueError,OSError,subprocess.SubprocessError) as exc:
             self.build_error = str(exc) if isinstance(exc,ValueError) else '准备未能完成，请检查 Docker 是否已正常启动，然后重试。'
             self.build_state, self.prepare_phase = 'error', 'error'
+
+    def _load_image(self, archive):
+        log = self.store.data_dir / 'build.log'
+        docker = self.docker
+        total = max(os.path.getsize(archive), 1)
+        self.prepare_progress = 0
+        try:
+            with open(archive, 'rb') as source, log.open('w') as output:
+                os.chmod(log, 0o600)
+                # docker load accepts gzip/xz/zstd archives; stream it so the
+                # interface can show how far the one-time import has got.
+                process = subprocess.Popen([docker, 'load'], stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT, env=command_env(docker))
+                try:
+                    sent = 0
+                    while chunk := source.read(1 << 20):
+                        process.stdin.write(chunk)
+                        sent += len(chunk)
+                        self.prepare_progress = min(99, sent * 100 // total)
+                    process.stdin.close()
+                    code = process.wait(timeout=1800)
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    process.kill()
+                    process.wait()
+                    raise ValueError('浏览器组件载入中断，请重试。') from exc
+        finally:
+            self.prepare_progress = None
+        if code or self._run(['image','inspect',IMAGE],timeout=10,check=False).returncode:
+            raise ValueError('浏览器组件载入失败，可重试；详情见本机 build.log。')
+        self.build_state, self.prepare_phase, self.build_error = 'ready', 'ready', None
+
+    def stop_all(self, wait_for_starting=30):
+        """Stop every started environment at once, e.g. when the app quits."""
+        deadline = time.monotonic() + wait_for_starting
+        for job in list(self.jobs.values()):
+            if job.is_alive():
+                job.join(max(0, deadline - time.monotonic()))
+        with self.lock:
+            objects = self.active_objects()
+            paused = [self.container_name(i) for i, o in objects.items() if o['State'].get('Paused')]
+            names = [self.container_name(i) for i in objects]
+            if paused:
+                self._run(['unpause', *paused], timeout=20, check=False)
+            # One docker stop call stops containers concurrently; each gets the
+            # same grace period the single-environment stop uses.
+            failed = self._run(['stop', '-t', '15', *names], timeout=60, check=False).returncode if names else 0
+            self.monitor.invalidate()
+        return {'stopped': len(names), 'ok': not failed}
 
     def _build_job(self):
         log = self.store.data_dir / 'build.log'
@@ -292,7 +374,7 @@ class Runtime(ResourceControls):
                 raise ValueError('Docker 尚未启动，请先打开 Docker Desktop。')
             with log.open('w') as output:
                 os.chmod(log, 0o600)
-                p = subprocess.run([self.docker, 'build', '-t', IMAGE, str(ROOT / 'runtime')], stdout=output, stderr=subprocess.STDOUT, timeout=1800)
+                p = subprocess.run([self.docker, 'build', '-t', IMAGE, str(ROOT / 'runtime')], stdout=output, stderr=subprocess.STDOUT, timeout=1800, env=command_env(self.docker))
             if p.returncode:
                 raise ValueError('浏览器组件构建失败，可重试；详情见本机 build.log。')
             self.build_state, self.prepare_phase = 'ready', 'ready'

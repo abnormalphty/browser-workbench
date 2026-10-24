@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleExecutable</key>
+	<string>BrowserWorkbench</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.abnormalphty.browserworkbench</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>境工作台</string>
+	<key>CFBundleDisplayName</key>
+	<string>境工作台</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>本地浏览器工作台 · 数据保存在这台电脑</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>导入旧版工作台数据时，需要读取你选择的 data 文件夹。</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>导入旧版工作台数据时，需要读取你选择的 data 文件夹。</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>“下载到电脑”会把环境里的文件保存到“下载”文件夹。</string>
+</dict>
+</plist>
