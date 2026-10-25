@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import tempfile
@@ -5,8 +6,12 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+import httpx
+import yaml
+
 from workbench.store import Store
-from workbench.subscriptions import SubscriptionError, parse_subscription, validate_node, _public_url
+from workbench import subscriptions
+from workbench.subscriptions import MAX_BYTES, SubscriptionError, parse_subscription, validate_node, _public_url
 
 
 class SubscriptionTests(unittest.TestCase):
@@ -47,7 +52,53 @@ class SubscriptionTests(unittest.TestCase):
         with self.assertRaises(SubscriptionError):
             validate_node({'name': 'x', 'type': 'ss', 'server': 'host', 'port': 70000, 'cipher': 'none', 'password': 'x'})
         with self.assertRaises(SubscriptionError):
-            parse_subscription('x' * 2_100_000)
+            parse_subscription('x' * (MAX_BYTES + 1))
+
+    def test_large_clash_config_parses_only_its_proxies(self):
+        # Airport configs carry megabytes of rules; only the proxies entry should be parsed.
+        rules = ''.join(f'  - DOMAIN-SUFFIX,site{i}.example.com,节点选择\n' for i in range(80_000))
+        text = ('mixed-port: 7890\nproxies:\n'
+                '  - {name: 香港 01, type: trojan, server: hk.example, port: 443, password: secret}\n'
+                '  - {name: 日本 01, type: ss, server: jp.example, port: 8388, cipher: aes-128-gcm, password: p}\n'
+                'proxy-groups:\n  - {name: 节点选择, type: select, proxies: [香港 01, 日本 01]}\nrules:\n' + rules)
+        self.assertGreater(len(text.encode()), 3 * 1024 * 1024)
+        with patch.object(subscriptions.yaml, 'load', wraps=yaml.load) as load:
+            nodes = parse_subscription(text)
+        self.assertEqual([n['name'] for n in nodes], ['香港 01', '日本 01'])
+        self.assertLess(max(len(call.args[0]) for call in load.call_args_list), 1000)
+
+    def test_proxies_at_column_zero_and_anchors_from_elsewhere(self):
+        flat = 'proxies:\n- {name: a, type: trojan, server: a.example, port: 443, password: x}\n- {name: b, type: trojan, server: b.example, port: 443, password: y}\nrules:\n- MATCH,DIRECT\n'
+        self.assertEqual([n['name'] for n in parse_subscription(flat)], ['a', 'b'])
+        # The proxies entry alone cannot resolve *base, so the whole document is read instead.
+        anchored = 'base: &base {type: ss, cipher: aes-128-gcm, password: p, port: 8388}\nproxies:\n  - {<<: *base, name: c, server: c.example}\n'
+        self.assertEqual(parse_subscription(anchored)[0]['cipher'], 'aes-128-gcm')
+
+    def test_unsupported_nodes_are_skipped_instead_of_failing_the_import(self):
+        text = ('proxies:\n'
+                '  - {name: ok, type: trojan, server: ok.example, port: 443, password: x}\n'
+                '  - {name: chained, type: trojan, server: c.example, port: 443, password: x, dialer-proxy: other}\n'
+                '  - {name: wg, type: wireguard, server: w.example, port: 51820}\n')
+        skipped = []
+        self.assertEqual([n['name'] for n in parse_subscription(text, skipped)], ['ok'])
+        self.assertEqual(len(skipped), 2)
+        lines = 'trojan://secret@ok.example:443#ok\nssr://bm90LXN1cHBvcnRlZA\nss://broken-without-auth@host:1#x\n'
+        skipped = []
+        self.assertEqual(len(parse_subscription(base64.b64encode(lines.encode()).decode(), skipped)), 1)
+        self.assertEqual(len(skipped), 2)
+        with self.assertRaisesRegex(SubscriptionError, '协议'):
+            parse_subscription('proxies:\n  - {name: wg, type: wireguard, server: w.example, port: 51820}\n')
+
+    def test_fetch_accepts_large_configs_and_stops_past_the_limit(self):
+        def client_returning(body):
+            real = httpx.AsyncClient
+            return lambda **options: real(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=body)), **options)
+        with patch.object(subscriptions, '_public_url'):
+            with patch.object(subscriptions.httpx, 'AsyncClient', client_returning(b'a' * (5 * 1024 * 1024))):
+                self.assertEqual(len(asyncio.run(subscriptions.fetch_subscription('https://sub.example/s'))), 5 * 1024 * 1024)
+            with patch.object(subscriptions.httpx, 'AsyncClient', client_returning(b'a' * (MAX_BYTES + 1))):
+                with self.assertRaisesRegex(SubscriptionError, '32 MB'):
+                    asyncio.run(subscriptions.fetch_subscription('https://sub.example/s'))
 
     def test_rejects_unsafe_nested_transport_settings(self):
         with self.assertRaises(SubscriptionError):

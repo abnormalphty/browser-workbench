@@ -197,11 +197,12 @@ $('environmentForm').onsubmit=async event=>{
     if(autoOpen){await startEnvironment(env.id,!nodeId&&$('testMode').checked);}else{toast(editingId?'修改已保存。':'环境已创建。');}
   }catch(e){if($('environmentDialog').open){$('environmentError').hidden=false;$('environmentError').textContent=e.message;}else{toast(e.message,true);if(!state.runtime.image_ready)showDialog('runtimeDialog');}}finally{$('saveEnvironment').disabled=false;}
 };
+const skippedNote=r=>r.skipped?`另有 ${r.skipped} 个节点用了暂不支持的协议或设置，已跳过。`:'';
 $('subscriptionForm').onsubmit=async event=>{
   event.preventDefault();$('importButton').disabled=true;$('importButton').textContent='正在导入…';$('subscriptionMessage').hidden=true;
-  try{const r=await api('subscription',{method:'POST',body:{url:$('subscriptionUrl').value}});$('subscriptionUrl').value='';$('subscriptionMessage').textContent=`已导入 ${r.count} 个节点。现在可以为环境选择线路。`;$('subscriptionMessage').className='inline-message';$('subscriptionMessage').hidden=false;await refresh();toast(`已导入 ${r.count} 个节点。`);}catch(e){$('subscriptionMessage').textContent=e.message;$('subscriptionMessage').className='inline-message error';$('subscriptionMessage').hidden=false;}finally{$('importButton').disabled=false;$('importButton').innerHTML='导入订阅<span>→</span>';}
+  try{const r=await api('subscription',{method:'POST',body:{url:$('subscriptionUrl').value}});$('subscriptionUrl').value='';$('subscriptionMessage').textContent=`已导入 ${r.count} 个节点。${skippedNote(r)}现在可以为环境选择线路。`;$('subscriptionMessage').className='inline-message';$('subscriptionMessage').hidden=false;await refresh();toast(`已导入 ${r.count} 个节点。`);}catch(e){$('subscriptionMessage').textContent=e.message;$('subscriptionMessage').className='inline-message error';$('subscriptionMessage').hidden=false;}finally{$('importButton').disabled=false;$('importButton').innerHTML='导入订阅<span>→</span>';}
 };
-$('refreshSubscription').onclick=async()=>{try{$('refreshSubscription').disabled=true;const r=await api('subscription',{method:'POST',body:{url:''}});toast(`订阅已更新，共 ${r.count} 个节点。`);await refresh();}catch(e){toast(e.message,true);}finally{$('refreshSubscription').disabled=false;}};
+$('refreshSubscription').onclick=async()=>{try{$('refreshSubscription').disabled=true;const r=await api('subscription',{method:'POST',body:{url:''}});toast(`订阅已更新，共 ${r.count} 个节点。${skippedNote(r)}`);await refresh();}catch(e){toast(e.message,true);}finally{$('refreshSubscription').disabled=false;}};
 $('toggleUrl').onclick=()=>$('subscriptionUrl').type=$('subscriptionUrl').type==='password'?'text':'password';
 $('runtimeButton').onclick=$('setupAction').onclick=()=>{updateRuntime();showDialog('runtimeDialog');};
 $('runtimePrimary').onclick=async()=>{

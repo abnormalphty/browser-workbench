@@ -139,9 +139,10 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
         if not url:
             raise ValueError('请填写机场订阅链接。')
         content = await fetch_subscription(url)
-        nodes = parse_subscription(content)
+        skipped = []
+        nodes = await asyncio.to_thread(parse_subscription, content, skipped)
         store.save_subscription(url, nodes)
-        return {'ok':True, 'count':len(store.public_state()['nodes'])}
+        return {'ok':True, 'count':len(store.public_state()['nodes']), 'skipped':len(skipped)}
 
     @app.post('/api/environments')
     async def create_environment(request: Request):

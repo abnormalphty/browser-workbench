@@ -2,6 +2,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -63,6 +64,15 @@ class ApiTests(unittest.TestCase):
         r = self.client.post('/api/subscription', json={'url':'file:///etc/passwd'}, headers=self.headers)
         self.assertEqual(r.status_code, 400)
         self.assertFalse(self.app.state.store.public_state()['subscription']['configured'])
+
+    def test_subscription_import_reports_skipped_nodes(self):
+        text = ('proxies:\n  - {name: ok, type: trojan, server: ok.example, port: 443, password: x}\n'
+                '  - {name: wg, type: wireguard, server: w.example, port: 51820}\n')
+        async def fetched(url): return text
+        with patch('workbench.app.fetch_subscription', fetched):
+            r = self.client.post('/api/subscription', json={'url':'https://sub.example/s'}, headers=self.headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {'ok': True, 'count': 1, 'skipped': 1})
 
     def test_health_page_has_no_demo_nodes(self):
         state = self.client.get('/api/state', headers=self.headers).json()

@@ -11,7 +11,11 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import httpx
 import yaml
 
-MAX_BYTES = 2 * 1024 * 1024
+# Clash configs from airports often carry megabytes of rules next to a few hundred nodes.
+MAX_BYTES = 32 * 1024 * 1024
+MAX_MB = MAX_BYTES // (1024 * 1024)
+TOP_PROXIES = re.compile(r'^proxies[ \t]*:', re.M)
+TOP_ENTRY = re.compile(r'^[^\s#-]', re.M)  # a line that starts the next top-level entry
 SUPPORTED = {'ss', 'vmess', 'vless', 'trojan', 'hysteria', 'hysteria2', 'tuic', 'socks5', 'http', 'snell', 'anytls'}
 FIELDS = {'name', 'type', 'server', 'port', 'password', 'username', 'cipher', 'uuid', 'alterId', 'udp', 'tls', 'servername', 'sni', 'skip-cert-verify', 'network', 'flow', 'client-fingerprint', 'alpn', 'ws-opts', 'grpc-opts', 'h2-opts', 'http-opts', 'reality-opts', 'plugin', 'plugin-opts', 'obfs', 'obfs-password', 'auth', 'auth-str', 'up', 'down', 'recv-window-conn', 'recv-window', 'disable-mtu-discovery', 'fast-open', 'version', 'heartbeat-interval', 'reduce-rtt', 'request-timeout', 'udp-relay-mode', 'congestion-controller', 'disable-sni', 'idle-session-check-interval', 'idle-session-timeout', 'min-idle-session', 'ip-version', 'tfo'}
 NESTED = {
@@ -165,9 +169,42 @@ def _uri(line: str) -> dict:
     return validate_node(n)
 
 
-def parse_subscription(text: str) -> list[dict]:
+def _proxies_entry(text: str):
+    """The top-level proxies list. When that entry can be cut out on its own, only it is parsed,
+    so the rule lists that make these configs large never become Python objects."""
+    loader = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+    starts = [m.start() for m in TOP_PROXIES.finditer(text)]
+    if len(starts) == 1:
+        end = TOP_ENTRY.search(text, starts[0] + 1)
+        try:
+            data = yaml.load(text[starts[0]:end.start() if end else None], Loader=loader)
+        except yaml.YAMLError:
+            data = None  # e.g. anchors defined elsewhere in the document
+        if isinstance(data, dict) and isinstance(data.get('proxies'), list):
+            return data['proxies']
+    data = yaml.load(text, Loader=loader)
+    return data.get('proxies') if isinstance(data, dict) else None
+
+
+def _usable(read, items, skipped):
+    """One unsupported node does not block the rest; a subscription without any usable node fails."""
+    nodes, errors = [], []
+    for item in items:
+        try:
+            nodes.append(read(item))
+        except (ValueError, TypeError) as exc:
+            errors.append(exc)
+    if not nodes:
+        raise errors[0]
+    if skipped is not None:
+        skipped.extend(errors)
+    return nodes
+
+
+def parse_subscription(text: str, skipped: list | None = None) -> list[dict]:
+    """Nodes this workbench can run. Errors of the nodes left out are appended to `skipped`."""
     if not isinstance(text, str) or len(text.encode()) > MAX_BYTES:
-        raise SubscriptionError('订阅内容过大，最多支持 2 MB。')
+        raise SubscriptionError(f'订阅内容过大，最多支持 {MAX_MB} MB。')
     text = text.lstrip('\ufeff').strip()
     if not text or text.startswith('<'):
         raise SubscriptionError('链接没有返回节点订阅，可能已失效或需要登录。')
@@ -175,15 +212,14 @@ def parse_subscription(text: str) -> list[dict]:
         if '://' not in text and not re.search(r'(^|\n)\s*proxies\s*:', text):
             text = _b64(text)
         if re.search(r'(^|\n)\s*proxies\s*:', text):
-            data = yaml.safe_load(text)
-            raw = data.get('proxies') if isinstance(data, dict) else None
+            raw = _proxies_entry(text)
             if not isinstance(raw, list) or not raw or len(raw) > 1000:
                 raise SubscriptionError('订阅中没有节点，或节点超过 1000 个。')
-            return [validate_node(n) for n in raw]
+            return _usable(validate_node, raw, skipped)
         lines = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('#')]
         if not lines or len(lines) > 1000:
             raise SubscriptionError('订阅中没有可识别的节点。')
-        return [_uri(line) for line in lines]
+        return _usable(_uri, lines, skipped)
     except SubscriptionError:
         raise
     except (ValueError, TypeError, yaml.YAMLError, RecursionError) as exc:
@@ -230,7 +266,7 @@ async def fetch_subscription(url: str) -> str:
                     async for chunk in response.aiter_bytes():
                         size += len(chunk)
                         if size > MAX_BYTES:
-                            raise SubscriptionError('订阅超过 2 MB，导入已停止。')
+                            raise SubscriptionError(f'订阅超过 {MAX_MB} MB，导入已停止。')
                         chunks.append(chunk)
                     return b''.join(chunks).decode('utf-8-sig')
         raise SubscriptionError('订阅跳转次数过多。')

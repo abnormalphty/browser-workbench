@@ -20,8 +20,9 @@ try {
   step('page runs in app mode with native bridge', native && document.documentElement.classList.contains('native-app'));
   // The page polls on its own; refresh() returns early while that call is in flight.
   await until(async () => { await refresh(); return state.app; }, 30000, 500);
-  step('backend reports app version', state.app?.version === '0.7.1' && state.app?.mode === 'desktop', JSON.stringify(state.app));
+  step('backend reports app version', state.app?.version === '0.7.2' && state.app?.mode === 'desktop', JSON.stringify(state.app));
   await snap('01-start');
+  step('import message counts skipped nodes', skippedNote({skipped: 2}).includes('另有 2 个节点') && skippedNote({skipped: 0}) === '');
 
   // Title band: the transparent title bar passes clicks to the page, so a native view takes the
   // band's clicks and drags the window; controls just below the band must still get theirs.
