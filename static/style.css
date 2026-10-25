@@ -381,6 +381,8 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 /* ---------- Mac app: the top band lies under the window's transparent title bar ---------- */
 html.native-app .sidebar { padding-top: calc(var(--bar-h) + 4px); }
 html.native-app .dialog { top: var(--bar-h); max-height: calc(100vh - var(--bar-h) - 40px); }
+/* The window drags from this band (TitleBarDragView in MainWindow.swift), so keep controls out of it. */
+html.native-app .topbar, html.native-app .browser-header { -webkit-user-select: none; user-select: none; cursor: default; }
 
 /* ---------- motion ---------- */
 .spinning { animation: spin 1.5s linear infinite; }

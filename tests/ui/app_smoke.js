@@ -20,8 +20,33 @@ try {
   step('page runs in app mode with native bridge', native && document.documentElement.classList.contains('native-app'));
   // The page polls on its own; refresh() returns early while that call is in flight.
   await until(async () => { await refresh(); return state.app; }, 30000, 500);
-  step('backend reports app version', state.app?.version === '0.7.0' && state.app?.mode === 'desktop', JSON.stringify(state.app));
+  step('backend reports app version', state.app?.version === '0.7.1' && state.app?.mode === 'desktop', JSON.stringify(state.app));
   await snap('01-start');
+
+  // Title band: the transparent title bar passes clicks to the page, so a native view takes the
+  // band's clicks and drags the window; controls just below the band must still get theirs.
+  const rect = selector => document.querySelector(selector).getBoundingClientRect();
+  const mid = r => [r.left + r.width / 2, r.top + r.height / 2];
+  const topOf = r => [r.left + Math.min(12, r.width / 2), r.top + 3];
+  const band = data => bridge('test.titleBand', data);
+  let tb = await band({points: [mid(rect('#breadcrumbCurrent')), [140, 26], [700, 51], [700, 53], topOf(rect('.brand')), topOf(rect('#newEnvironment'))]});
+  step('title band drags the window; traffic lights and controls below it still click',
+    tb.band === 52 && tb.closeButton === 'button' && tb.hits.join() === 'drag,drag,drag,page,page,page', JSON.stringify(tb));
+  await band({zoom: 1.5});
+  await sleep(800);
+  tb = await band({points: [mid(rect('#breadcrumbCurrent')), [500, 51], [500, 53], topOf(rect('.brand'))]});
+  await band({zoom: 1});
+  await sleep(500);
+  step('drag band follows page zoom', tb.band === 78 && tb.hits.join() === 'drag,drag,page,page', JSON.stringify(tb));
+  tb = await band({click: mid(rect('#breadcrumbCurrent'))});
+  step('click in the title band starts a window drag', tb.drags === 1, JSON.stringify(tb));
+  if (tb.doubleClick === 'zoom') {
+    const before = tb.zoomed, first = await band({click: [700, 26], count: 2}), second = await band({click: [700, 26], count: 2});
+    step('double-click in the title band zooms the window, and again restores it',
+      first.zoomed !== before && second.zoomed === before && first.drags === 0, JSON.stringify({before, first, second}));
+  } else {
+    steps.push({name: 'double-click in the title band', ok: null, detail: 'skipped: this Mac is set to ' + tb.doubleClick});
+  }
 
   // Docker found and opened, bundled image loaded if missing.
   let shotLoading = false;
@@ -63,6 +88,8 @@ try {
   step('remote screen connects in the app window', connected && !$('browserView').hidden);
   await sleep(4000);
   await snap('04-environment-view');
+  const bv = await band({points: [mid(rect('.browser-identity')), topOf(rect('#exitBrowser')), mid(rect('#browserAddress'))]});
+  step('browser view: header drags the window, toolbar below it clicks', bv.hits.join() === 'drag,page,page', JSON.stringify(bv));
 
   // Paste: text put on the Mac clipboard reaches a focused textarea inside Firefox.
   await browserAction('navigate', {url: '__FIXTURE__/'});

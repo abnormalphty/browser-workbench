@@ -128,9 +128,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(URL(string: "https://github.com/abnormalphty/browser-workbench#readme")!)
     }
 
-    @objc func zoomIn(_ sender: Any?) { window.webView.pageZoom = min(window.webView.pageZoom + 0.1, 2) }
-    @objc func zoomOut(_ sender: Any?) { window.webView.pageZoom = max(window.webView.pageZoom - 0.1, 0.6) }
-    @objc func zoomReset(_ sender: Any?) { window.webView.pageZoom = 1 }
+    @objc func zoomIn(_ sender: Any?) { window.pageZoom = min(window.pageZoom + 0.1, 2) }
+    @objc func zoomOut(_ sender: Any?) { window.pageZoom = max(window.pageZoom - 0.1, 0.6) }
+    @objc func zoomReset(_ sender: Any?) { window.pageZoom = 1 }
 
     @objc func importLegacyData(_ sender: Any?) {
         LegacyImport(backend: backend, window: window).begin()

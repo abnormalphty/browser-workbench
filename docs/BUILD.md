@@ -9,7 +9,7 @@ scripts/export_runtime_image.sh arm64
 # 2. 组装并签名应用（带上镜像）
 scripts/build_app.sh arm64 --with-image ~/Library/Caches/BrowserWorkbenchBuild/runtime-image/browser-runtime-arm64.tar.gz
 
-# 3. 生成 DMG → dist/Browser-Workbench-0.7.0-arm64.dmg 及 .sha256
+# 3. 生成 DMG → dist/Browser-Workbench-0.7.1-arm64.dmg 及 .sha256
 scripts/make_dmg.sh arm64
 ```
 

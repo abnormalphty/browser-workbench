@@ -18,6 +18,8 @@ private final class WeakScriptHandler: NSObject, WKScriptMessageHandlerWithReply
 final class MainWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate,
                                   WKDownloadDelegate, WKScriptMessageHandlerWithReply {
     let webView: WKWebView
+    private let titleBand = TitleBarDragView()
+    private let titleBandHeight: NSLayoutConstraint
     var onRetry: (() -> Void)?
     private var port: Int?
     private var downloads: [ObjectIdentifier: URL] = [:]
@@ -37,7 +39,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
                               backing: .buffered, defer: false)
         window.title = "Browser Workbench"
         // A transparent, unified 52 pt title bar: the page's sidebar and top band run under it
-        // (style.css reserves that band in html.native-app), and the band still drags the window.
+        // (style.css reserves that band in html.native-app). The title bar passes clicks there
+        // through to the web view, so titleBand takes them and drags the window instead.
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         let toolbar = NSToolbar(identifier: "MainToolbar")
@@ -51,6 +54,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.contentView = webView
+        titleBand.translatesAutoresizingMaskIntoConstraints = false
+        webView.addSubview(titleBand)
+        titleBandHeight = titleBand.heightAnchor.constraint(equalToConstant: Self.barHeight)
+        NSLayoutConstraint.activate([titleBand.topAnchor.constraint(equalTo: webView.topAnchor),
+                                     titleBand.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
+                                     titleBand.trailingAnchor.constraint(equalTo: webView.trailingAnchor), titleBandHeight])
         if !window.setFrameUsingName("MainWindow") { window.center() }
         window.setFrameAutosaveName("MainWindow")
         super.init(window: window)
@@ -75,6 +84,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? NSColor(srgbRed: 0x19 / 255, green: 0x1c / 255, blue: 0x1b / 255, alpha: 1)
             : NSColor(srgbRed: 0xf5 / 255, green: 0xf6 / 255, blue: 0xf5 / 255, alpha: 1)
+    }
+
+    /// Same as --bar-h in style.css: the page's top band, which holds no controls.
+    static let barHeight: CGFloat = 52
+
+    /// Page zoom (显示 menu). The drag band grows and shrinks with the page's top band.
+    var pageZoom: CGFloat {
+        get { webView.pageZoom }
+        set {
+            webView.pageZoom = newValue
+            titleBandHeight.constant = Self.barHeight * newValue
+        }
     }
 
     // MARK: Pages
@@ -198,6 +219,32 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         case "test.appearance":
             NSApp.appearance = NSAppearance(named: body["mode"] as? String == "dark" ? .darkAqua : .aqua)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { replyHandler(["ok": true], nil) }
+        case "test.titleBand":
+            // Optionally zoom; report what takes a click at each page point (CSS px); optionally click.
+            // Synthetic clicks never move the window: performDrag only follows a real mouse button.
+            guard let window else { return replyHandler(nil, "unavailable") }
+            if let zoom = body["zoom"] as? Double { pageZoom = zoom }
+            window.layoutIfNeeded()
+            let points = (body["points"] as? [[Double]] ?? []).filter { $0.count == 2 }
+            var reply: [String: Any] = ["band": titleBandHeight.constant, "doubleClick": TitleBarDragView.doubleClickAction,
+                                        "hits": points.map { hitKind(at: windowPoint(page: $0[0], $0[1])) }]
+            if let close = window.standardWindowButton(.closeButton) {
+                reply["closeButton"] = hitKind(at: close.convert(NSPoint(x: close.bounds.midX, y: close.bounds.midY), to: nil))
+            }
+            guard let click = body["click"] as? [Double], click.count == 2 else { return replyHandler(reply, nil) }
+            let location = windowPoint(page: click[0], click[1]), clicks = body["count"] as? Int ?? 1, before = titleBand.drags
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks,
+                                                  pressure: type == .leftMouseDown ? 1 : 0) {
+                    NSApp.postEvent(event, atStart: false)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                reply["drags"] = self.titleBand.drags - before
+                reply["zoomed"] = window.isZoomed
+                replyHandler(reply, nil)
+            }
         case "test.quit":
             replyHandler(["ok": true], nil)
             (NSApp.delegate as? AppDelegate)?.quitForTest(stopEnvironments: body["stopEnvironments"] as? Bool ?? false)
@@ -340,6 +387,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         }
     }
 
+    /// A page point (CSS px from the top left) in window coordinates.
+    private func windowPoint(page x: Double, _ y: Double) -> NSPoint {
+        let zoom = Double(pageZoom), top = y * zoom
+        return webView.convert(NSPoint(x: x * zoom, y: webView.isFlipped ? top : Double(webView.bounds.height) - top), to: nil)
+    }
+
+    private func hitKind(at point: NSPoint) -> String {
+        guard let hit = window?.contentView?.superview?.hitTest(point) else { return "none" }
+        if hit === titleBand { return "drag" }
+        if hit === webView || hit.isDescendant(of: webView) { return "page" }
+        return hit is NSButton ? "button" : String(describing: type(of: hit))
+    }
+
     /// Same priority as the page's own clipboard code: an image first, then text.
     private func readPasteboard(_ pasteboard: NSPasteboard) -> [String: Any] {
         var result: [String: Any] = [:]
@@ -363,6 +423,42 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         // Closing the window keeps the app (and running environments) alive; the Dock icon reopens it.
         sender.orderOut(nil)
         return false
+    }
+}
+
+/// Covers the page's top band, which lies under the transparent title bar. AppKit passes clicks
+/// there through to the web view, which swallows them, so without this view the window could only
+/// be dragged by its top few points. The band holds no controls (style.css), so the page loses nothing.
+final class TitleBarDragView: NSView {
+    /// Drags started, for the developer self-test.
+    private(set) var drags = 0
+
+    /// What double-clicking a title bar does (System Settings → Desktop & Dock): zoom, minimize or none.
+    static var doubleClickAction: String {
+        let defaults = UserDefaults.standard
+        switch defaults.string(forKey: "AppleActionOnDoubleClick") {
+        case "Minimize": return "minimize"
+        case "None": return "none"
+        case nil: return defaults.bool(forKey: "AppleMiniaturizeOnDoubleClick") ? "minimize" : "zoom"
+        default: return "zoom"
+        }
+    }
+
+    // Handled in mouseDown below rather than by AppKit, so every click here behaves the same.
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        guard event.clickCount == 2 else {
+            drags += 1
+            return window.performDrag(with: event)
+        }
+        switch Self.doubleClickAction {
+        case "minimize": window.miniaturize(nil)
+        case "zoom": window.zoom(nil)
+        default: break
+        }
     }
 }
 
