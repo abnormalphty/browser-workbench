@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # City coordinates are display points; a name match is never labelled an exit measurement.
 ROWS = [
-('tokyo','东京','JP',35.68,139.69,'Asia/Tokyo','東京|日本|japan|tokyo|🇯🇵'),
+('osaka','大阪','JP',34.69,135.5,'Asia/Tokyo','大阪|osaka'),  # before Tokyo: its row also holds 日本 / 🇯🇵
+('tokyo','东京','JP',35.68,139.69,'Asia/Tokyo','东京|東京|日本|japan|tokyo|🇯🇵'),
 ('seoul','首尔','KR',37.57,126.98,'Asia/Seoul','首爾|首尔|韩国|韓國|korea|seoul|🇰🇷'),
 ('taipei','台北','TW',25.03,121.56,'Asia/Taipei','台北|臺北|台湾|台灣|臺灣|taiwan|taipei|🇹🇼'),
 ('hong-kong','香港','HK',22.32,114.17,'Asia/Hong_Kong','香港|hong.?kong|🇭🇰'),
@@ -57,6 +58,10 @@ ROWS = [
 ('shanghai','上海','CN',31.23,121.47,'Asia/Shanghai','上海|中国|中國|shanghai|🇨🇳'),
 ]
 PLACES={row[0]:dict(id=row[0],label=row[1],country_code=row[2],lat=row[3],lon=row[4],timezone=row[5]) for row in ROWS}
+# Subscription entries that only carry account information, not a route.
+INFO_NODE=re.compile('流量|到期|剩余|剩餘|续费|續費|更新时间|更新時間|续约|續約|expire|traffic',re.I)
+RECHECK_AFTER=7*86400   # exits can move; detected ones are checked again after a week
+RETRY_AFTER=12*3600     # a node that answered no lookup is tried again after this
 COUNTRIES=[('US','美国',39,-98,'美国|美國|united.?states|🇺🇸'),('CA','加拿大',57,-106,'加拿大|canada|🇨🇦'),('RU','俄罗斯',61,98,'俄罗斯|俄羅斯|russia|🇷🇺'),('AU','澳大利亚',-25,134,'澳大利亚|澳洲|australia|🇦🇺'),('BR','巴西',-14,-52,'巴西|brazil|🇧🇷'),('MX','墨西哥',24,-102,'墨西哥|mexico|🇲🇽'),('ID','印度尼西亚',-2,118,'印度尼西亚|印尼|indonesia|🇮🇩')]
 
 
@@ -72,12 +77,45 @@ def infer_location(name):
     return None
 
 
-def zone_offsets(zone):
-    tz=ZoneInfo(zone)
-    def offset(month):
-        minutes=int(datetime(datetime.now().year,month,15,tzinfo=tz).utcoffset().total_seconds()/60)
-        return f"UTC{'+' if minutes>=0 else '−'}{abs(minutes)//60:02}:{abs(minutes)%60:02}"
-    return {'january':offset(1),'july':offset(7)}
+def zone_offsets(zone,now=None):
+    """January and July offsets, the standard (winter) and daylight-saving (summer) ones, and which
+    applies now. IANA rules decide them, so both hemispheres and zones without DST come out right."""
+    tz=ZoneInfo(zone);now=(now or datetime.now(tz)).astimezone(tz)
+    def minutes(moment):return int(moment.utcoffset().total_seconds()/60)
+    def label(m):return f"UTC{'+' if m>=0 else '−'}{abs(m)//60:02}:{abs(m)%60:02}"
+    january,july=(minutes(datetime(now.year,month,15,tzinfo=tz)) for month in (1,7))
+    # Clocks go forward for summer, so the larger offset is the daylight-saving one.
+    standard,daylight=min(january,july),max(january,july)
+    return {'january':label(january),'july':label(july),'standard':label(standard),'daylight':label(daylight) if daylight!=standard else None,
+            'now':label(minutes(now)),'dst_now':daylight!=standard and minutes(now)==daylight}
+
+
+def distance_km(lat1,lon1,lat2,lon2):
+    a=math.sin(math.radians(lat2-lat1)/2)**2+math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(math.radians(lon2-lon1)/2)**2
+    return 12742*math.asin(math.sqrt(a))
+
+
+def nearby_place(found):
+    """A listed city within 100 km in the same country: its Chinese name, and one map point per city."""
+    lat,lon=float(found['lat']),float(found['lon'])
+    place=min(PLACES.values(),key=lambda p:distance_km(lat,lon,p['lat'],p['lon']))
+    if place['country_code']==found['country_code'] and distance_km(lat,lon,place['lat'],place['lon'])<=100:
+        return {'label':place['label'],'lat':place['lat'],'lon':place['lon']}
+    return {'label':found.get('label') or found['country_code']}
+
+
+def exit_location(answer):
+    """The probe's answer from one of the lookup services, as a detected exit location. The time
+    zone always comes from the service, for the exit IP itself."""
+    data=answer['data']
+    if answer['service']=='ipwho.is':
+        if not data.get('success'):raise ValueError()
+        found=dict(country_code=data['country_code'],label=data.get('city'),lat=data['latitude'],lon=data['longitude'],timezone=data['timezone']['id'])
+    elif answer['service']=='ipinfo.io':
+        lat,lon=data['loc'].split(',')
+        found=dict(country_code=data['country'],label=data.get('city'),lat=lat,lon=lon,timezone=data['timezone'])
+    else:raise ValueError()
+    return validate_location({**found,**nearby_place(found),'source':'exit'})
 
 
 def validate_location(data):
@@ -105,29 +143,33 @@ def node_location(store,node_id,name):
     return geo
 
 
+# Runs in the browser image: asks a lookup service, through the node, where its exit is.
+# The second service is used only when the first gives no answer.
 PROBE_SCRIPT=r'''
 import httpx,json,subprocess,time,socket
+services=[('ipwho.is','https://ipwho.is/?fields=success,country_code,city,latitude,longitude,timezone.id'),('ipinfo.io','https://ipinfo.io/json')]
 p=subprocess.Popen(['mihomo','-f','/config/proxy.yaml'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+answer={}
 try:
  for _ in range(50):
   try:
    with socket.create_connection(('127.0.0.1',7890),timeout=.2):break
   except OSError:time.sleep(.1)
- with httpx.Client(proxy='http://127.0.0.1:7890',trust_env=False,timeout=15) as c:
-  r=c.get('https://ipwho.is/?fields=success,country_code,city,latitude,longitude,timezone.id')
-  r.raise_for_status();d=r.json()
-  if not d.get('success'):raise ValueError()
-  print(json.dumps({'country_code':d['country_code'],'label':d.get('city') or d['country_code'],'lat':d['latitude'],'lon':d['longitude'],'timezone':d['timezone']['id'],'source':'exit'}))
-except Exception:print('{}')
-finally:p.terminate();p.wait(timeout=3)
+ with httpx.Client(proxy='http://127.0.0.1:7890',trust_env=False,timeout=10) as c:
+  for service,url in services:
+   try:
+    r=c.get(url);r.raise_for_status();answer={'service':service,'data':r.json()};break
+   except Exception:pass
+finally:
+ print(json.dumps(answer));p.terminate();p.wait(timeout=3)
 '''
 
 
 class Geography:
     def __init__(self,store,runtime):
         self.store,self.runtime=store,runtime
-        self.lock=threading.RLock();self.batch=None
-        self.progress={'running':False,'done':0,'total':0,'failed':0}
+        self.lock=threading.RLock();self.batch=None;self.queued=None
+        self.progress={'running':False,'done':0,'total':0,'failed':0,'automatic':False}
 
     def locate(self,node_id,force=False):
         node=self.store.get_node(node_id)
@@ -141,9 +183,13 @@ class Geography:
         try:
             with tempfile.TemporaryDirectory(prefix='location-',dir=self.store.data_dir) as temp:
                 file=Path(temp)/'proxy.yaml';file.write_text(yaml.safe_dump(build_proxy_config(node)));file.chmod(0o600)
-                result=self.runtime._run(['run','--rm','--name',name,'--label','workbench.location-probe=true','--memory','256m','--cpus','0.5','--pids-limit','64','--security-opt','no-new-privileges:true','--mount',f'type=bind,source={temp},target=/config,readonly','--entrypoint','python',IMAGE,'-c',PROBE_SCRIPT],timeout=30,check=False)
+                result=self.runtime._run(['run','--rm','--name',name,'--label','workbench.location-probe=true','--memory','256m','--cpus','0.5','--pids-limit','64','--security-opt','no-new-privileges:true','--mount',f'type=bind,source={temp},target=/config,readonly','--entrypoint','python',IMAGE,'-c',PROBE_SCRIPT],timeout=40,check=False)
                 if result.returncode:raise ValueError()
-                verified=validate_location(json.loads(result.stdout.strip()))
+                try:verified=exit_location(json.loads(result.stdout.strip() or '{}'))
+                except (ValueError,TypeError,KeyError,AttributeError):
+                    # No lookup service answered through this node: try again later, not on every start.
+                    self.store.set_setting('location_failed:'+node_id,time.time())
+                    raise
                 self.store.set_setting('node_location:'+node_id,verified)
                 return verified
         except Exception:
@@ -153,11 +199,28 @@ class Geography:
             try:self.runtime._run(['rm','-f',name],timeout=5,check=False)
             except Exception:pass
 
-    def start_batch(self):
+    def candidates(self,force):
+        """Routes to detect: all of them for 重新检测 (force); otherwise those without a detected exit,
+        with one older than a week, or that failed and have not been tried for a while."""
+        now=time.time();chosen=[]
+        for node in self.store.public_state()['nodes']:
+            geo=node['geo'] or {}
+            if INFO_NODE.search(node['name']) or geo.get('source')=='manual':continue
+            if not force and (geo.get('source')=='exit' and now-geo.get('checked_at',0)<RECHECK_AFTER
+                              or now-self.store.get_setting('location_failed:'+node['id'],0)<RETRY_AFTER):continue
+            chosen.append(node)
+        return chosen
+
+    def start_batch(self,force=True):
+        """Detect exits in the background: from 重新检测 (force), and on its own after a subscription
+        import and whenever the runtime becomes ready."""
         with self.lock:
-            if self.batch and self.batch.is_alive():return
-            nodes=[n for n in self.store.public_state()['nodes'] if not re.search('流量|到期|剩余|剩餘|续费|續費|更新时间|更新時間|续约|續約|expire|traffic',n['name'],re.I)][:100]
-            self.progress={'running':True,'done':0,'total':len(nodes),'failed':0}
+            if self.batch and self.batch.is_alive():
+                self.queued=force if self.queued is None else self.queued or force  # runs when this batch ends
+                return
+            nodes=self.candidates(force)
+            if not nodes:return
+            self.progress={'running':True,'done':0,'total':len(nodes),'failed':0,'automatic':not force}
             self.batch=threading.Thread(target=self._batch,args=(nodes,),daemon=True);self.batch.start()
 
     def _batch(self,nodes):
@@ -168,10 +231,17 @@ class Geography:
                 return value['source'] in ('exit','manual')
             except Exception:return False
         try:
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            # Without Docker every probe would fail: stop rather than mark the routes as failed.
+            if not self.runtime.status()['image_ready']:
+                self.progress.update(done=0,total=0)
+                return
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 for task in as_completed([pool.submit(probe,node) for node in nodes]):
                     with self.lock:
                         self.progress['done']+=1
                         if not task.result():self.progress['failed']+=1
         finally:
-            self.progress['running']=False
+            with self.lock:
+                self.progress['running']=False
+                queued,self.queued,self.batch=self.queued,None,None
+            if queued is not None:self.start_batch(queued)

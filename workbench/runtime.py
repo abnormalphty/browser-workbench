@@ -205,9 +205,15 @@ class Runtime(ResourceControls):
     def _start_job(self, env, proxy, test_mode):
         env_id = env['id']
         try:
-            timezone = None
-            if env.get('timezone_mode') == 'node':
-                timezone = self.geography.locate(env['node_id'])['timezone'] if env['node_id'] else 'Etc/UTC'
+            # The route's city sets the time zone (IANA, so DST switches on its own).
+            timezone = 'Etc/UTC' if env.get('timezone_mode') == 'node' else None
+            if env['node_id']:
+                try:
+                    timezone = self.geography.locate(env['node_id'])['timezone']
+                except ValueError:
+                    # Environments from before time zones still start as they did when no city is known.
+                    if env.get('timezone_mode') == 'node':
+                        raise
             self._run(['rm', '-f', self.container_name(env_id)], check=False)
             config_dir, profile_dir = self.environment_paths(env_id)
             for d in [config_dir, profile_dir]:
@@ -319,6 +325,10 @@ class Runtime(ResourceControls):
         except (ValueError,OSError,subprocess.SubprocessError) as exc:
             self.build_error = str(exc) if isinstance(exc,ValueError) else '准备未能完成，请检查 Docker 是否已正常启动，然后重试。'
             self.build_state, self.prepare_phase = 'error', 'error'
+        finally:
+            # Routes imported while Docker was not ready get their exits detected now.
+            if self.build_state == 'ready':
+                self.geography.start_batch(force=False)
 
     def _load_image(self, archive):
         log = self.store.data_dir / 'build.log'

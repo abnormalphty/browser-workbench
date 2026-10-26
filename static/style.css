@@ -275,6 +275,7 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 .node-card-body strong { display: block; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .node-card-body small { display: block; font-size: 12px; line-height: 1.55; color: var(--text-3); }
 .node-card-body .text-button { margin-top: 6px; font-size: 12px; }
+.node-card .zone-part { white-space: nowrap; }  /* the time-zone line breaks between parts, never inside one */
 .nodes-empty { padding: 40px; text-align: center; background: var(--surface); border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--text-3); }
 
 /* ---------- accounts & resources ---------- */

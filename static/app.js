@@ -85,13 +85,15 @@ function renderEnvironments(){
     const names={running:'运行中',starting:'启动中',stopped:'已停止',error:'需要重试',paused:'低功耗'};
     const fp=r.fingerprint;
     const core=e.engine==='firefox'?'标准 Firefox · 独立环境':'旧内核已移除 · 数据保留';
-    const meta=fp?`${esc(fp.language)} · ${esc(fp.timezone)} · ${esc(fp.screen)}`:(r.timezone?`zh-CN · ${esc(r.timezone)} · 独立数据目录`:'原生浏览器配置 · 独立数据目录');
+    const meta=fp?`${esc(fp.language)} · ${esc(fp.timezone)} · ${esc(fp.screen)}`:(r.timezone?`zh-CN · ${esc(r.timezone)} · 独立数据目录`:n?.geo?.timezone?`时区随线路 · ${esc(n.geo.timezone)} · 独立数据目录`:'原生浏览器配置 · 独立数据目录');
     return `<article class="environment-row"><div class="environment-identity"><div class="env-avatar">${String(index).padStart(2,'0')}</div><div><div class="env-name" title="${esc(e.name)}">${esc(e.name)} ${accountPill(e.account)}</div><div class="env-meta env-core">${core}</div><div class="env-meta">${meta}</div></div></div><div class="env-node"><div class="node-name">${esc(n?.name|| (e.node_id?'原节点已失效':'未绑定线路'))}</div><div class="node-detail">${esc(n?.type.toUpperCase()||'可使用无代理测试')}</div></div><div class="env-status"><span class="status-pill ${esc(r.status)}">${r.status==='running'?'<i class="dot green"></i>':''}${names[r.status]||'未知状态'}</span>${r.test_mode?'<div class="node-detail">无代理测试</div>':''}</div><div class="env-runtime runtime-detail"><div class="ip">${esc(r.exit_ip|| (r.test_mode?'测试模式 · 无代理':'出口未检测'))}</div><div>${r.status==='stopped'?'未占用资源':r.memory_mb!=null?esc(r.memory_mb)+' MB · '+(r.cpu_cores!=null?r.cpu_cores.toFixed(2)+' 核':'CPU 待采样'):'等待资源采样'}</div>${r.error?`<div title="${esc(r.error)}">启动失败，点击重试</div>`:''}</div><div class="row-actions"><button class="button ${r.status==='running'?'primary':'secondary'}" data-action="open" data-id="${e.id}" ${r.status==='starting'?'disabled':''}>${r.status==='paused'?'唤醒并打开':r.status==='running'?'打开浏览器':r.status==='starting'?'启动中…':'启动环境'}</button>${['running','paused'].includes(r.status)?`<button class="button ghost" data-action="stop" data-id="${e.id}">停止</button>`:''}<button class="icon-button" data-action="info" data-id="${e.id}" title="查看信息" aria-label="查看 ${esc(e.name)} 的信息">${icon('info')}</button><button class="icon-button" data-action="edit" data-id="${e.id}" title="编辑环境" aria-label="编辑 ${esc(e.name)}" ${['running','starting','paused'].includes(r.status)?'disabled':''}>${icon('edit')}</button><button class="icon-button" data-action="delete" data-id="${e.id}" title="删除环境" aria-label="删除 ${esc(e.name)}" ${r.status==='starting'?'disabled':''}>${icon('trash')}</button></div></article>`;
   }).join('');
 }
 let selectedMapKey=null, locationNodeId=null;
 const geoKey=g=>`${g.lat.toFixed(1)},${g.lon.toFixed(1)}`;
 const geoSource=g=>g?.source==='exit'?'出口检测':g?.source==='manual'?'手动指定':'名称推测';
+const zoneParts=g=>!g?.timezone?[]:g.daylight?[`冬令时 ${g.standard}`,`夏令时 ${g.daylight}`,`现在是${g.dst_now?'夏令时':'冬令时'}`]:[`全年 ${g.standard}，不用夏令时`];
+const zoneText=g=>zoneParts(g).join(' · ');
 function renderNodes(){
   const query=$('nodeSearch').value.trim().toLowerCase();
   const matching=state.nodes.filter(n=>n.name.toLowerCase().includes(query));
@@ -103,8 +105,8 @@ function renderNodes(){
   $('nodesEmpty').hidden=state.nodes.length>0;
   $('nodesList').innerHTML=visible.map(n=>{
     const g=n.geo;
-    const offsets=g?.january?`1月 ${g.january} · 7月 ${g.july}`:'';
-    return `<article class="node-card">${icon('globe')}<div class="node-card-body"><strong>${esc(n.name)}</strong><small>${esc(n.type.toUpperCase())} · ${g?esc(g.label)+' · '+geoSource(g):'位置待确认'}</small><small>${esc(g?.timezone||'需检测或选择城市，才能确定时区')}</small>${offsets?`<small>${esc(offsets)}</small>`:''}<button class="text-button" data-set-location="${n.id}">设置城市与时区 ↗</button></div></article>`;
+    const offsets=zoneParts(g).map(part=>`<span class="zone-part">${esc(part)}</span>`).join(' · ');
+    return `<article class="node-card">${icon('globe')}<div class="node-card-body"><strong>${esc(n.name)}</strong><small>${esc(n.type.toUpperCase())} · ${g?esc(g.label)+' · '+geoSource(g):'位置待确认'}</small><small>${esc(g?.timezone||'需检测或选择城市，才能确定时区')}</small>${offsets?`<small>${offsets}</small>`:''}<button class="text-button" data-set-location="${n.id}">设置城市与时区 ↗</button></div></article>`;
   }).join('');
   $('mapMarkers').innerHTML=[...groups].map(([key,nodes])=>{
     const g=nodes[0].geo,verified=nodes.some(n=>n.geo.source!=='name');
@@ -117,8 +119,8 @@ function renderNodes(){
   if(selectedMapKey){const g=groups.get(selectedMapKey)[0].geo;$('mapSelection').textContent=`${g.label} · ${geoSource(g)} · ${g.timezone||'城市与时区待确认'}`;}
   const progress=state.geography?.progress;
   $('probeLocations').disabled=!state.nodes.length||!state.runtime.image_ready||progress?.running;
-  $('probeLocations').textContent=progress?.running?`检测中 ${progress.done} / ${progress.total}`:'检测出口位置 ↗';
-  $('mapProgress').textContent=progress?.running?'正在逐条检测节点出口，页面会自动更新。已打开的环境不受影响。':progress?.total?`检测完成 ${progress.done} / ${progress.total}${progress.failed?' · '+progress.failed+' 条未确认，保留名称推测或手动设置':''}。出口可能随线路变化。`:'点击标记筛选线路。同地点的节点合并显示；名称推测不代表实际出口。底图：Natural Earth。';
+  $('probeLocations').textContent=progress?.running?`检测中 ${progress.done} / ${progress.total}`:'重新检测出口 ↗';
+  $('mapProgress').textContent=progress?.running?'正在自动检测每条线路的实际出口，地图会随结果更新。已打开的环境不受影响。':state.nodes.length&&!state.runtime.image_ready?'运行组件准备好后，会自动检测每条线路的实际出口。':progress?.total?`检测完成 ${progress.done} / ${progress.total}${progress.failed?' · '+progress.failed+' 条未确认，保留名称推测或手动设置':''}。出口可能随线路变化。`:'点击标记筛选线路。同地点的节点合并显示；名称推测不代表实际出口。底图：Natural Earth。';
   $('refreshSubscription').hidden=!state.subscription.configured;
 }
 
@@ -139,7 +141,11 @@ function nodeOptions(selected){
   $('environmentNode').innerHTML='<option value="">不绑定节点（仅无代理测试）</option>'+state.nodes.map(n=>`<option value="${n.id}">${esc(n.name)} · ${esc(n.type.toUpperCase())}</option>`).join('');
   $('environmentNode').value=selected||'';updateTestOption();
 }
-function updateTestOption(){$('testOption').hidden=Boolean($('environmentNode').value);}
+function updateTestOption(){
+  const node=state.nodes.find(n=>n.id===$('environmentNode').value),g=node?.geo;
+  $('testOption').hidden=Boolean(node);
+  $('environmentTimezone').textContent=!node?'无代理测试使用 UTC 时区。':g?.timezone?`时区随线路：${g.label} · ${g.timezone} · 现在 ${g.now}${g.daylight?`（${g.dst_now?'夏令时':'冬令时'}，换季时自动切换）`:''}`:'这条线路的城市还没确定：启动前会自动检测出口；检测不到时，请在“订阅与线路”里为它选择城市。';
+}
 function newEnvironment(test=false){
   $('resourceCreateFields').hidden=false;$('createCpuLimit').value=2;$('createMemoryLimit').value=2;setLimitInputBounds('createCpuLimit','createMemoryLimit');
   editingId=null;$('environmentEngine').disabled=false;$('environmentEngine').value='firefox';$('environmentDialogTitle').textContent='新建环境';$('saveEnvironment').innerHTML='创建环境<span>→</span>';$('environmentName').value=test?'本机测试环境':'';$('environmentError').hidden=true;$('testMode').checked=test;$('autoOpen').checked=true;$('autoOpenOption').hidden=false;

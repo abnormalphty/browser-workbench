@@ -142,6 +142,8 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
         skipped = []
         nodes = await asyncio.to_thread(parse_subscription, content, skipped)
         store.save_subscription(url, nodes)
+        if runtime.build_state == 'ready':
+            runtime.geography.start_batch(force=False)
         return {'ok':True, 'count':len(store.public_state()['nodes']), 'skipped':len(skipped)}
 
     @app.post('/api/environments')

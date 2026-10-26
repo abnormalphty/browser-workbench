@@ -13,7 +13,7 @@ Mac 应用的数据在 `~/Library/Application Support/BrowserWorkbench`，日志
 ## 会访问哪些外部服务
 
 - 导入 / 更新订阅时，访问使用者填写的订阅服务。
-- 启动正式环境时，通过所选代理访问 api.ipify.org 查询出口 IP；出口地理检测访问 ipwho.is。
+- 启动正式环境时，通过所选代理访问 api.ipify.org 查询出口 IP；出口地理检测（导入订阅后和每次打开工作台时自动进行）通过被检测的线路访问 ipwho.is，无响应时改用 ipinfo.io。
 - 浏览器访问使用者打开的网站；账号核对打开 Claude 设置页。
 - 源码运行或联网构建时访问 Python、Debian、Docker 和 GitHub 等软件源；Mac 应用默认载入自带的浏览器组件，不需要这些访问。
 - 应用里点“下载 Docker Desktop”时，用默认浏览器打开 Docker 官方下载地址。

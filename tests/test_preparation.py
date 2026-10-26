@@ -18,6 +18,13 @@ class PreparationTests(unittest.TestCase):
   with patch.object(self.r,'status',return_value={'docker_installed':True,'docker_ready':True,'image_ready':True}),patch.object(self.r,'_open_desktop') as opened,patch.object(self.r,'_build_job') as built:
    self.r._prepare_job()
   opened.assert_not_called();built.assert_not_called();self.assertEqual(self.r.build_state,'ready')
+ def test_ready_runtime_starts_automatic_exit_detection(self):
+  with patch.object(self.r,'status',return_value={'docker_installed':True,'docker_ready':True,'image_ready':True}),patch.object(self.r.geography,'start_batch') as start:
+   self.r._prepare_job()
+  start.assert_called_once_with(force=False)
+  with patch.object(self.r,'status',return_value={'docker_installed':False,'docker_ready':False,'image_ready':False}),patch.object(self.r.geography,'start_batch') as start:
+   self.r._prepare_job()
+  start.assert_not_called()
  def test_missing_docker_explains_installation_without_trying_build(self):
   with patch.object(self.r,'status',return_value={'docker_installed':False,'docker_ready':False,'image_ready':False}),patch.object(self.r,'_open_desktop') as opened,patch.object(self.r,'_build_job') as built:
    self.r._prepare_job()

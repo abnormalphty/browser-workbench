@@ -74,6 +74,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {'ok': True, 'count': 1, 'skipped': 1})
 
+    def test_import_starts_automatic_exit_detection_once_the_runtime_is_ready(self):
+        async def fetched(url): return 'proxies:\n  - {name: ok, type: trojan, server: ok.example, port: 443, password: x}\n'
+        runtime = self.app.state.runtime
+        for state, expected in [('idle', []), ('ready', [((), {'force': False})])]:
+            runtime.build_state = state
+            with patch('workbench.app.fetch_subscription', fetched), patch.object(runtime.geography, 'start_batch') as start:
+                self.client.post('/api/subscription', json={'url':'https://sub.example/s'}, headers=self.headers)
+            self.assertEqual([tuple(c) for c in start.call_args_list], expected)
+
     def test_health_page_has_no_demo_nodes(self):
         state = self.client.get('/api/state', headers=self.headers).json()
         self.assertEqual(state['nodes'], [])
