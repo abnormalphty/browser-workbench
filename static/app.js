@@ -1,10 +1,21 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="workbench-token"]').content;
-// Inside the Mac app, clipboard, links and downloads use native code instead of
-// browser permission prompts; in a normal browser this stays null.
-const native = window.webkit?.messageHandlers?.workbench && window.workbenchNative ? {call:(type,data={})=>window.webkit.messageHandlers.workbench.postMessage({type,...data})} : null;
-if(native)document.documentElement.classList.add('native-app');
+// Inside the desktop app, clipboard, links and downloads use native code instead of browser
+// permission prompts: WKWebView's message handler on the Mac, the WebView2 bridge on Windows.
+// In a normal browser this stays null.
+const native = !window.workbenchNative ? null : window.webkit?.messageHandlers?.workbench ? {call:(type,data={})=>window.webkit.messageHandlers.workbench.postMessage({type,...data})}
+  : window.workbenchBridge ? {call:(type,data={})=>window.workbenchBridge.call(type,data)} : null;
+const onWindows = window.workbenchNative?.platform === 'windows' || /Windows/.test(navigator.userAgent);
+const keys = onWindows ? {paste:'Ctrl+V'} : {paste:'⌘V'};
+const fileManager = onWindows ? '资源管理器' : 'Finder';
+if(native)document.documentElement.classList.add('native-app', onWindows ? 'native-win' : 'native-mac');
+// The same page runs in the Mac app, the Windows app and a browser: name each system's own tools.
+document.querySelectorAll('[data-open-transfer]').forEach(button=>button.textContent=`在 ${fileManager} 中打开 ↗`);
+if(onWindows){
+  $('runtimeInstall').innerHTML='<li>点下方“下载 Docker Desktop”，运行下载好的 Docker Desktop Installer.exe，保持“Use WSL 2”勾选，按提示完成安装；要求重启电脑时请重启。</li><li>打开 Docker Desktop，同意它的服务条款；登录和问卷可以跳过。提示安装或更新 WSL、或在 BIOS 里开启虚拟化时，按它的说明操作。</li><li>回到 Browser Workbench：它会自动连上 Docker，并载入自带的浏览器组件。</li>';
+  $('dockerGuide').href='https://docs.docker.com/desktop/setup/install/windows-install/';
+}
 function openExternal(url){if(native)native.call('openExternal',{url}).catch(()=>{});else window.open(url,'_blank','noopener,noreferrer');}
 const paths = {
   grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -291,7 +302,7 @@ $('pasteFromComputer').onclick=async()=>{
     }else{await pasteIntoEnvironment(await navigator.clipboard.readText());}
   }catch(e){
     if(e.name==='NotAllowedError'||e.name==='NotFoundError'){
-      $('browserTextPanel').hidden=false;$('browserText').focus();toast('浏览器未开放剪贴板读取。请在文字框里按 ⌘V，再点“发送到输入框”。');
+      $('browserTextPanel').hidden=false;$('browserText').focus();toast(`浏览器未开放剪贴板读取。请在文字框里按 ${keys.paste}，再点“发送到输入框”。`);
     }else toast(e.message,true);
   }
 };
@@ -331,7 +342,7 @@ document.addEventListener('drop',event=>{
 window.addEventListener('workbench-native-download',event=>{
   const d=event.detail||{};
   if(!d.ok){toast(`“${d.name||'文件'}”没有下载完成，请重试。`,true);return;}
-  toast(`已保存到“下载”文件夹：${d.name}`,false,{label:'在 Finder 中显示',run:()=>native?.call('revealFile',{path:d.path}).catch(()=>{})});
+  toast(`已保存到“下载”文件夹：${d.name}`,false,{label:`在 ${fileManager} 中显示`,run:()=>native?.call('revealFile',{path:d.path}).catch(()=>{})});
 });
 
 const copyRequests=new Map();
@@ -347,7 +358,7 @@ function remoteCopyText(){
 }
 function copyFromEnvironment(){
   const text=remoteCopyText();
-  if(native){text.then(value=>native.call('clipboard.writeText',{text:value})).then(()=>toast('已复制到主电脑，可以在外面按 ⌘V 粘贴。')).catch(e=>toast(e.message,true));return;}
+  if(native){text.then(value=>native.call('clipboard.writeText',{text:value})).then(()=>toast(`已复制到主电脑，可以在外面按 ${keys.paste} 粘贴。`)).catch(e=>toast(e.message,true));return;}
   let write;
   try{
     if(navigator.clipboard?.write&&typeof ClipboardItem!=='undefined'){
@@ -355,7 +366,7 @@ function copyFromEnvironment(){
       write=navigator.clipboard.write([new ClipboardItem({'text/plain':text.then(value=>new Blob([value],{type:'text/plain'}))})]);
     }else{write=text.then(value=>navigator.clipboard.writeText(value));}
   }catch(error){write=Promise.reject(error);}
-  write.then(()=>toast('已复制到主电脑，可以在外面按 ⌘V 粘贴。')).catch(async error=>{
+  write.then(()=>toast(`已复制到主电脑，可以在外面按 ${keys.paste} 粘贴。`)).catch(async error=>{
     try{
       const value=await text;
       $('copyFallbackText').value=value;showDialog('copyFallbackDialog');

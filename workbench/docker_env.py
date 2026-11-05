@@ -1,13 +1,17 @@
-"""Find a Docker-compatible engine even when started from a Mac app.
+"""Find a Docker-compatible engine even when started from a desktop app.
 
 Apps opened from Finder get PATH=/usr/bin:/bin:/usr/sbin:/sbin, so the docker
-CLI and its credential helpers are invisible unless we look for them.
+CLI and its credential helpers are invisible unless we look for them. On
+Windows, Docker Desktop's PATH entry only reaches processes started after the
+installation, so its default location is checked as well.
 """
 from functools import lru_cache
 import os
 import shutil
 import subprocess
 from pathlib import Path
+
+from .system import windows
 
 HOME = Path.home()
 CLI_CANDIDATES = (
@@ -26,6 +30,9 @@ ENGINE_APPS = (
     ('OrbStack', '/Applications/OrbStack.app'),
     ('OrbStack', str(HOME/'Applications/OrbStack.app')),
 )
+PROGRAM_FILES = Path(os.environ.get('ProgramFiles', r'C:\Program Files'))
+WINDOWS_CLI = (str(PROGRAM_FILES/'Docker'/'Docker'/'resources'/'bin'/'docker.exe'),)
+WINDOWS_ENGINE_APPS = (('Docker Desktop', str(PROGRAM_FILES/'Docker'/'Docker'/'Docker Desktop.exe')),)
 EXTRA_PATH = ('/usr/local/bin', '/opt/homebrew/bin', str(HOME/'.docker/bin'),
               '/Applications/Docker.app/Contents/Resources/bin', str(HOME/'.orbstack/bin'))
 
@@ -34,13 +41,15 @@ def find_cli():
     found = shutil.which('docker')
     if found:
         return found
-    for candidate in CLI_CANDIDATES:
+    for candidate in WINDOWS_CLI if windows() else CLI_CANDIDATES:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
 
 
 def engine_app():
+    if windows():
+        return next(({'name': name, 'path': path} for name, path in WINDOWS_ENGINE_APPS if Path(path).is_file()), None)
     for name, path in ENGINE_APPS:
         if Path(path).is_dir():
             return {'name': name, 'path': path}
@@ -51,6 +60,9 @@ def command_env(cli):
     """PATH for docker subprocesses: credential helpers live beside the CLI."""
     env = dict(os.environ)
     parts = [str(Path(cli).parent)] if cli else []
+    if windows():
+        env['PATH'] = os.pathsep.join(dict.fromkeys(p for p in parts + env.get('PATH', '').split(os.pathsep) if p))
+        return env
     parts += [*EXTRA_PATH, *env.get('PATH', '/usr/bin:/bin:/usr/sbin:/sbin').split(':')]
     env['PATH'] = ':'.join(dict.fromkeys(p for p in parts if p))
     return env
@@ -67,4 +79,7 @@ def apple_silicon():
 
 
 def download_url():
+    if windows():
+        # The browser image is built for x64 Windows PCs.
+        return 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
     return 'https://desktop.docker.com/mac/main/' + ('arm64' if apple_silicon() else 'amd64') + '/Docker.dmg'

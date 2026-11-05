@@ -1,6 +1,6 @@
 # 第三方组件
 
-源码仓库只提交工作台自身的代码。**Mac 应用（DMG）会随附**下列第三方组件的二进制文件：自带的 Python 运行时与依赖，以及预先构建的浏览器组件镜像。第三方组件继续适用其原有许可证与商标规则。
+源码仓库只提交工作台自身的代码。**Mac 应用（DMG）和 Windows 安装包会随附**下列第三方组件的二进制文件：自带的 Python 运行时与依赖，以及预先构建的浏览器组件镜像；Windows 版另附 WebView2 SDK 组件与安装程序框架。第三方组件继续适用其原有许可证与商标规则。
 
 ## 随应用附带：本机后台服务
 
@@ -9,9 +9,19 @@
 | CPython 3.12（python-build-standalone 构建） | 运行工作台后端 | PSF License（构建脚本 BSD-3-Clause），内含 OpenSSL（Apache-2.0）、SQLite（公共领域）等 | https://www.python.org/ ・ https://github.com/astral-sh/python-build-standalone |
 | FastAPI / Starlette / Pydantic / Uvicorn / HTTPX / httpcore / h11 / anyio / websockets / PyYAML / certifi 等 | 本机 HTTP 服务与依赖 | MIT、BSD、MPL-2.0（certifi）等，详见各包 `*.dist-info` 中的许可文件 | PyPI 对应项目 |
 
+## 随 Windows 版附带
+
+| 组件 | 用途 | 许可证 | 上游 |
+| --- | --- | --- | --- |
+| CPython 3.12 Windows 版（python-build-standalone 构建），含 Microsoft Visual C++ 运行库 `vcruntime140*.dll` | 运行工作台后端 | PSF License；VC++ 运行库按 Microsoft Visual Studio 可再发行组件条款随附 | 同上 |
+| Microsoft Edge WebView2 SDK（`Microsoft.Web.WebView2.*.dll`、`WebView2Loader.dll`） | 窗口内显示工作台页面 | BSD 风格许可，全文随应用附在 `licenses\WebView2-SDK.txt` | https://www.nuget.org/packages/Microsoft.Web.WebView2 |
+| Microsoft Edge WebView2 运行库安装器（`MicrosoftEdgeWebview2Setup.exe`，仅在缺少运行库时由安装程序运行） | 安装 WebView2 运行库 | Microsoft 分发条款 | https://developer.microsoft.com/microsoft-edge/webview2/ |
+| NSIS 3.11 | 安装与卸载程序 | zlib/libpng 许可（部分组件 bzip2、CPL），全文附在 `licenses\NSIS.txt` | https://nsis.sourceforge.io/ |
+| .NET Framework 4.8、Microsoft Edge WebView2 运行库 | 窗口外壳运行环境 | Windows 自带或由微软安装，不随应用附带 | https://dotnet.microsoft.com/ |
+
 ## 随应用附带：浏览器组件镜像（`runtime-image/browser-runtime.tar.gz`）
 
-由本仓库 `runtime/Dockerfile` 从下列来源构建；完整的包名与版本清单随应用附在 `Contents/Resources/runtime-image/manifest.txt`。
+由本仓库 `runtime/Dockerfile` 从下列来源构建（Mac 版为 ARM64，Windows 版为 x64）；完整的包名与版本清单随应用附在 `runtime-image/manifest.txt`（Mac 版在 `Contents/Resources/` 下）。
 
 | 组件 | 用途 | 许可证 | 源码 |
 | --- | --- | --- | --- |
@@ -28,7 +38,7 @@ GPL / LGPL 组件的对应源码可从上面列出的上游取得：Debian 软�
 | 组件 | 用途 | 上游 |
 | --- | --- | --- |
 | Natural Earth | 世界地图底图 | https://www.naturalearthdata.com/about/terms-of-use/ （公共领域数据） |
-| Docker Desktop / OrbStack | 容器运行服务 | 由使用者自行安装，并遵守其适用条款；不随应用附带 |
+| Docker Desktop / OrbStack / WSL 2 | 容器运行服务 | 由使用者自行安装，并遵守其适用条款；不随应用附带 |
 
 此仓库和应用不附带第三方网站账号、代理订阅或访问权限。源码中的第三方名称用于说明兼容对象，不代表其认可本项目。
 

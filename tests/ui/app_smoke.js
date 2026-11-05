@@ -1,10 +1,11 @@
-// Runs inside the app's WKWebView via BROWSER_WORKBENCH_UI_TEST (see run_app_smoke.sh).
+// Runs inside the app's web view (WKWebView on the Mac, WebView2 on Windows) via
+// BROWSER_WORKBENCH_UI_TEST (see run_app_smoke.sh).
 // The body is an async function with the page's globals (state, api, openBrowser…) in scope.
 // __FIXTURE__ is replaced by the harness with http://host.docker.internal:PORT.
 const steps = [];
 const step = (name, ok, detail = '') => { steps.push({name, ok: !!ok, detail: String(detail).slice(0, 400)}); return !!ok; };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const bridge = (type, data = {}) => window.webkit.messageHandlers.workbench.postMessage({type, ...data});
+const bridge = (type, data = {}) => native.call(type, data);
 const snap = name => bridge('test.snapshot', {name}).catch(() => {});
 async function until(check, ms, every = 1000) {
   const end = Date.now() + ms;
@@ -20,7 +21,7 @@ try {
   step('page runs in app mode with native bridge', native && document.documentElement.classList.contains('native-app'));
   // The page polls on its own; refresh() returns early while that call is in flight.
   await until(async () => { await refresh(); return state.app; }, 30000, 500);
-  step('backend reports app version', state.app?.version === '0.7.3' && state.app?.mode === 'desktop', JSON.stringify(state.app));
+  step('backend reports app version', state.app?.version === '0.8.0' && state.app?.mode === 'desktop', JSON.stringify(state.app));
   await snap('01-start');
   // Route time zones: the environment dialog says which zone a route brings, and whether DST applies now.
   const tzNode = {id: 'f'.repeat(32), name: '时区自测 洛杉矶', type: 'http', geo: {label: '洛杉矶', timezone: 'America/Los_Angeles', standard: 'UTC−08:00', daylight: 'UTC−07:00', now: 'UTC−07:00', dst_now: true, source: 'exit'}};
@@ -35,10 +36,15 @@ try {
 
   // Title band: the transparent title bar passes clicks to the page, so a native view takes the
   // band's clicks and drags the window; controls just below the band must still get theirs.
+  // Windows has an ordinary title bar: there the page must not reserve the band at all.
   const rect = selector => document.querySelector(selector).getBoundingClientRect();
   const mid = r => [r.left + r.width / 2, r.top + r.height / 2];
   const topOf = r => [r.left + Math.min(12, r.width / 2), r.top + 3];
   const band = data => bridge('test.titleBand', data);
+  if (onWindows) {
+    step('Windows page: no Mac title band, Windows wording', document.documentElement.classList.contains('native-win') && rect('.brand').top < 40 &&
+      $('runtimeInstall').textContent.includes('Docker Desktop Installer.exe') && document.querySelector('[data-open-transfer]').textContent.includes('资源管理器'));
+  } else {
   let tb = await band({points: [mid(rect('#breadcrumbCurrent')), [140, 26], [700, 51], [700, 53], topOf(rect('.brand')), topOf(rect('#newEnvironment'))]});
   step('title band drags the window; traffic lights and controls below it still click',
     tb.band === 52 && tb.closeButton === 'button' && tb.hits.join() === 'drag,drag,drag,page,page,page', JSON.stringify(tb));
@@ -56,6 +62,7 @@ try {
       first.zoomed !== before && second.zoomed === before && first.drags === 0, JSON.stringify({before, first, second}));
   } else {
     steps.push({name: 'double-click in the title band', ok: null, detail: 'skipped: this Mac is set to ' + tb.doubleClick});
+  }
   }
 
   // Docker found and opened, bundled image loaded if missing.
@@ -98,8 +105,10 @@ try {
   step('remote screen connects in the app window', connected && !$('browserView').hidden);
   await sleep(4000);
   await snap('04-environment-view');
-  const bv = await band({points: [mid(rect('.browser-identity')), topOf(rect('#exitBrowser')), mid(rect('#browserAddress'))]});
-  step('browser view: header drags the window, toolbar below it clicks', bv.hits.join() === 'drag,page,page', JSON.stringify(bv));
+  if (!onWindows) {
+    const bv = await band({points: [mid(rect('.browser-identity')), topOf(rect('#exitBrowser')), mid(rect('#browserAddress'))]});
+    step('browser view: header drags the window, toolbar below it clicks', bv.hits.join() === 'drag,page,page', JSON.stringify(bv));
+  }
 
   // Paste: text put on the Mac clipboard reaches a focused textarea inside Firefox.
   await browserAction('navigate', {url: '__FIXTURE__/'});

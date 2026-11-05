@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import secrets
 import re
+import sys
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -121,7 +122,7 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
     @app.get('/api/state')
     def state():
         result = store.public_state()
-        result['app'] = {'version':__version__, 'mode':os.environ.get('WORKBENCH_MODE', 'source')}
+        result['app'] = {'version':__version__, 'mode':os.environ.get('WORKBENCH_MODE', 'source'), 'platform':sys.platform}
         result['runtime'] = runtime.status()
         from .geography import PLACES
         result['geography'] = {'progress':dict(runtime.geography.progress),'places':list(PLACES.values())}
@@ -294,12 +295,12 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
 
     @app.post('/api/environments/{env_id}/files/open')
     async def open_files(env_id: str, request: Request):
-        import subprocess
+        from .system import open_folder
         data = await body(request)
         kind = text(data,'kind','downloads')
         files = Transfers(store, env_id)
         with files.directory(kind):
-            subprocess.Popen(['open',str(files.path/kind)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            open_folder(files.path/kind)
         return {'ok':True}
 
     @app.websocket('/view/{env_id}/websockify')

@@ -70,7 +70,10 @@ def main():
         if directory.is_symlink():
             raise RuntimeError('Transfer directory must not be a symbolic link')
         directory.mkdir(mode=0o700, exist_ok=True)
-        os.chown(directory, 1000, 1000)
+        try:
+            os.chown(directory, 1000, 1000)
+        except PermissionError:
+            pass  # a folder shared from Windows keeps its own permissions, which let the browser write
     gtk = Path('/home/browser/.config/gtk-3.0')
     gtk.mkdir(parents=True, exist_ok=True)
     (gtk/'bookmarks').write_text('file:///profile/transfer/incoming 电脑传入文件\nfile:///profile/transfer/downloads 环境下载文件\n')

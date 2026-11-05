@@ -1,5 +1,5 @@
 @charset "UTF-8";
-/* Browser Workbench — one stylesheet for the Mac app (html.native-app) and the browser.
+/* Browser Workbench — one stylesheet for the desktop apps (html.native-app: native-mac / native-win) and the browser.
    Colours are tokens so the page follows the system's light / dark appearance. */
 
 :root {
@@ -380,8 +380,8 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 .browser-frame-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 
 /* ---------- Mac app: the top band lies under the window's transparent title bar ---------- */
-html.native-app .sidebar { padding-top: calc(var(--bar-h) + 4px); }
-html.native-app .dialog { top: var(--bar-h); max-height: calc(100vh - var(--bar-h) - 40px); }
+html.native-mac .sidebar { padding-top: calc(var(--bar-h) + 4px); }
+html.native-mac .dialog { top: var(--bar-h); max-height: calc(100vh - var(--bar-h) - 40px); }
 /* The window drags from this band (TitleBarDragView in MainWindow.swift), so keep controls out of it. */
 html.native-app .topbar, html.native-app .browser-header { -webkit-user-select: none; user-select: none; cursor: default; }
 

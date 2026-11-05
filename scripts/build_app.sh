@@ -80,7 +80,7 @@ B=$R/backend
 mkdir -p "$B/workbench" "$B/static" "$B/runtime"
 cp workbench/*.py "$B/workbench/"
 cp static/{index.html,app.js,style.css,clipboard-bridge.js,world.svg} "$B/static/"
-cp runtime/{Dockerfile,.dockerignore,entrypoint.py,browser.py,native_firefox.py,desktop_clipboard.py,account_info.py,welcome.html} "$B/runtime/"
+cp runtime/{Dockerfile,.dockerignore,apt-install.sh,entrypoint.py,browser.py,native_firefox.py,desktop_clipboard.py,account_info.py,welcome.html} "$B/runtime/"
 cp requirements.txt THIRD_PARTY_NOTICES.md "$B/"
 
 echo "--> bytecode (the signed bundle is never written to at run time)"

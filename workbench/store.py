@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 ID = re.compile(r'^[a-f0-9]{32}$')
@@ -32,10 +33,16 @@ class Store:
             if 'memory_limit_mb' not in columns:db.execute('ALTER TABLE environments ADD COLUMN memory_limit_mb INTEGER NOT NULL DEFAULT 2048')
         os.chmod(self.db, 0o600)
 
+    @contextmanager
     def connect(self):
+        """One transaction; the file is closed right after it (Windows cannot delete an open file)."""
         db = sqlite3.connect(self.db, timeout=10)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def valid_id(value: str) -> str:

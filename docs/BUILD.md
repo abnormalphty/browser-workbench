@@ -3,15 +3,17 @@
 需要：macOS 13+、Xcode（命令行工具中的 `swiftc`）、正在运行的 Docker（导出浏览器镜像时需要）、可访问 GitHub 和 PyPI 的网络（第一次下载 Python 运行时与依赖）。
 
 ```sh
-# 1. 浏览器组件镜像：没有 local-browser-workbench:0.7.0 时会先构建（首次需要联网，十几分钟）
+# 1. 浏览器组件镜像：没有与 RUNTIME_VERSION 同版本的 local-browser-workbench 镜像时会先构建（首次需要联网，十几分钟；加 --rebuild 强制重建）
 scripts/export_runtime_image.sh arm64
 
 # 2. 组装并签名应用（带上镜像）
 scripts/build_app.sh arm64 --with-image ~/Library/Caches/BrowserWorkbenchBuild/runtime-image/browser-runtime-arm64.tar.gz
 
-# 3. 生成 DMG → dist/Browser-Workbench-0.7.3-arm64.dmg 及 .sha256
+# 3. 生成 DMG → dist/Browser-Workbench-0.8.0-arm64.dmg 及 .sha256
 scripts/make_dmg.sh arm64
 ```
+
+Windows 安装包也在 Mac 上构建，见 [Windows 版说明](WINDOWS.md#构建在-mac-上)：`scripts/fetch_windows_tools.sh`、`scripts/export_runtime_image.sh x86_64`、`scripts/build_windows.sh`。
 
 不带 `--with-image` 时生成轻量版应用：首次使用会在使用者电脑上联网构建镜像，与 v0.6.1 相同。
 
@@ -24,7 +26,7 @@ scripts/make_dmg.sh arm64
   - 按白名单复制 `workbench/`、`static/`、`runtime/`；预编译 `.pyc`（unchecked-hash），运行时以 `-B` 启动，从不写入已签名的应用包。
   - 运行 `scripts/check_bundle.py`：应用包里出现数据库、日志、launch.json、proxy.yaml、浏览器配置目录、私钥或构建者本机路径时，构建失败。
   - 对每个 Mach-O 文件和整个应用做 ad-hoc 签名（`SIGN_IDENTITY` 可换成 Developer ID 证书），最后 `codesign --verify --deep --strict`。
-- `export_runtime_image.sh`：检查镜像架构与 `workbench.runtime` 标签，生成组件清单（Firefox、mihomo、全部 Debian 包版本），`docker save | gzip` 导出并写 SHA-256。
+- `export_runtime_image.sh`：检查镜像架构与 `workbench.runtime` 标签，生成组件清单（Firefox、mihomo、全部 Debian 包版本），`docker save | gzip` 导出并写 SHA-256。另一种架构（x86_64）在模拟环境里直接构建进导出文件，不替换本机镜像。Debian 软件包经 `runtime/apt-install.sh` 安装：网络不稳时重试更新和下载，已下载的包在重试间保留。
 - `make_dmg.sh`：应用 + “应用程序”快捷方式 + 安装说明，`hdiutil` 生成 UDZO 压缩的 DMG 并校验。
 
 构建产物在 `~/Library/Caches/BrowserWorkbenchBuild`（可用 `BUILD_ROOT` 改位置）。只有 DMG 放进项目的 `dist/`。原因：项目在 iCloud 同步的“文稿”里，大文件会被上传；iCloud 附加的 Finder 信息也会让 codesign 拒绝签名。
@@ -48,4 +50,4 @@ scripts/make_dmg.sh arm64
 
 ## Intel Mac
 
-`fetch_python.sh x86_64` 和 `build_app.sh x86_64` 可以在 Apple 芯片的 Mac 上交叉生成 Intel 版外壳与 Python 依赖，但浏览器镜像要在 Intel Mac 上导出（`export_runtime_image.sh` 只导出本机架构）。Intel 版目前没有构建和验证。
+`fetch_python.sh x86_64` 和 `build_app.sh x86_64` 可以在 Apple 芯片的 Mac 上交叉生成 Intel 版外壳与 Python 依赖，浏览器镜像可用 `export_runtime_image.sh x86_64` 在模拟环境里构建（Windows 版用的就是它，较慢）。Intel 版目前没有构建和验证。

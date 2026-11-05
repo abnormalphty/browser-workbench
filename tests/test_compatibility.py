@@ -38,6 +38,7 @@ class CompatibilityTests(unittest.TestCase):
             with sqlite3.connect(path/'workbench.sqlite3') as db:
                 db.execute('CREATE TABLE environments (id TEXT PRIMARY KEY, name TEXT NOT NULL, node_id TEXT, fingerprint_seed TEXT NOT NULL, created_at REAL NOT NULL)')
                 db.execute('INSERT INTO environments VALUES (?,?,?,?,?)', ('a'*32, '保留数据', None, 'existing-seed', 1))
+            db.close()
             store = Store(path)
             environment = store.get_environment('a'*32)
             self.assertIn('engine', environment)

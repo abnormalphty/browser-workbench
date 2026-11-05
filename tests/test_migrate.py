@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,6 +15,7 @@ def tree(root):
     return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path(root).rglob('*')) if p.is_file()}
 
 
+@unittest.skipIf(sys.platform == 'win32', 'imports the earlier Mac workbench; POSIX permissions and symlinks')
 class MigrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -20,6 +20,7 @@ from workbench.store import Store
 ROOT = Path(__file__).resolve().parent.parent
 
 
+@unittest.skipIf(sys.platform == 'win32', 'the Mac locations; the Windows ones are checked in test_windows.py')
 class DockerDiscoveryTests(unittest.TestCase):
     def test_cli_on_path_wins_then_known_app_locations_are_searched(self):
         with patch.object(docker_env.shutil, 'which', return_value='/custom/bin/docker'):
@@ -163,7 +164,7 @@ class ControlApiTests(unittest.TestCase):
         html = self.client.get('/').text
         token = re.search(r'name="workbench-token" content="([^"]+)"', html).group(1)
         state = self.client.get('/api/state', headers={'X-Workbench-Token':token}).json()
-        self.assertEqual(state['app']['version'], '0.7.3')
+        self.assertEqual(state['app']['version'], '0.8.0')
         self.assertIn('docker_download_url', state['runtime'])
 
 

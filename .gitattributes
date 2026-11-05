@@ -1,0 +1,4 @@
+# Shell scripts run on macOS and inside the Linux browser image: keep LF line endings even in a
+# Windows checkout (Git for Windows converts text files to CRLF by default).
+*.sh text eol=lf
+runtime/** text eol=lf

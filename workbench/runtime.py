@@ -12,13 +12,18 @@ import httpx
 import yaml
 
 from .docker_env import command_env, download_url, engine_app, find_cli
+from .system import quiet, windows
 
 # Bump with runtime/Dockerfile's label whenever files under runtime/ change.
-RUNTIME_VERSION = '0.7.0'
+RUNTIME_VERSION = '0.8.0'
 IMAGE = 'local-browser-workbench:' + RUNTIME_VERSION
 ROOT = Path(__file__).resolve().parent.parent
 # First Docker Desktop start can sit behind its own agreement / sign-in pages.
 ENGINE_WAIT_SECONDS = 600
+
+
+WINDOWS_CONTAINERS = ('Docker Desktop 现在使用的是 Windows 容器，浏览器环境需要 Linux 容器。请在屏幕右下角任务栏的 Docker 图标上点右键，'
+                      '选择“Switch to Linux containers…”，切换完成后点重试。')
 
 
 def build_proxy_config(node: dict | None) -> dict:
@@ -91,7 +96,7 @@ class Runtime(ResourceControls):
         if not docker:
             raise ValueError('尚未找到 Docker，请先完成运行组件准备。')
         try:
-            p = subprocess.run([docker, *args], capture_output=True, text=True, timeout=timeout, input=input_text, env=command_env(docker))
+            p = subprocess.run([docker, *args], capture_output=True, text=True, timeout=timeout, input=input_text, env=command_env(docker), **quiet())
         except subprocess.TimeoutExpired as exc:
             raise ValueError('运行服务响应超时，请检查 Docker 是否已启动。') from exc
         if check and p.returncode:
@@ -106,7 +111,7 @@ class Runtime(ResourceControls):
             try:image=self._run(['image','inspect',IMAGE],timeout=5,check=False).returncode==0
             except ValueError:pass
         app=engine_app()
-        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'prepare_progress':self.prepare_progress,'engine_app':app['name'] if app else None,'image_bundled':bool(self.image_archive()),'docker_download_url':download_url(),'max_running':self.store.resource_settings()['max_running']}
+        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'docker_os':info.get('os_type'),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'prepare_progress':self.prepare_progress,'engine_app':app['name'] if app else None,'image_bundled':bool(self.image_archive()),'docker_download_url':download_url(),'max_running':self.store.resource_settings()['max_running']}
 
     def container_name(self, env_id):
         self.store.valid_id(env_id)
@@ -116,6 +121,15 @@ class Runtime(ResourceControls):
         self.store.valid_id(env_id)
         root = self.store.data_dir / 'environments' / env_id
         return root / 'config', root / 'profile'
+
+    def volume_profiles(self):
+        """Windows keeps Firefox profiles in Docker volumes: folders shared from Windows refuse
+        ownership changes and break SQLite's locking. Only the transfer folder stays on disk there."""
+        return os.environ.get('WORKBENCH_PROFILE_STORAGE', 'volume' if windows() else 'folder') == 'volume'
+
+    def profile_volume(self, env_id):
+        self.store.valid_id(env_id)
+        return 'workbench-' + self.scope + '-' + env_id
 
     def _inspect(self, env_id):
         p = self._run(['inspect', self.container_name(env_id)], check=False)
@@ -218,12 +232,20 @@ class Runtime(ResourceControls):
             config_dir, profile_dir = self.environment_paths(env_id)
             for d in [config_dir, profile_dir]:
                 d.mkdir(parents=True, exist_ok=True, mode=0o700)
+            storage = ['--mount', f'type=bind,source={profile_dir},target=/profile']
+            if self.volume_profiles():
+                transfer = profile_dir / 'transfer'
+                for kind in ('incoming', 'downloads'):
+                    (transfer / kind).mkdir(parents=True, exist_ok=True, mode=0o700)
+                volume = self.profile_volume(env_id)
+                self._run(['volume', 'create', '--label', f'workbench.scope={self.scope}', '--label', f'workbench.environment={env_id}', volume])
+                storage = ['--mount', f'type=volume,source={volume},target=/profile', '--mount', f'type=bind,source={transfer},target=/profile/transfer']
             launch = {'environment_id': env_id, 'fingerprint_seed': env['fingerprint_seed'], 'engine': env.get('engine', 'firefox'), 'test_mode': test_mode, 'timezone':timezone, 'worker_secret': secrets.token_urlsafe(32), 'vnc_password': secrets.token_hex(4)}
             for name, payload in [('launch.json', json.dumps(launch)), ('proxy.yaml', yaml.safe_dump(proxy or {}, allow_unicode=True))]:
                 path = config_dir / name
                 path.write_text(payload)
                 os.chmod(path, 0o600)
-            self._run(['run', '-d', '--name', self.container_name(env_id), '--label', f'workbench.scope={self.scope}', '--label', f'workbench.environment={env_id}', '--shm-size', '512m', '--memory', str(env['memory_limit_mb'])+'m', '--memory-swap', str(env['memory_limit_mb']*2)+'m', '--cpus', str(env['cpu_limit']), '--pids-limit', '512', '--security-opt', 'no-new-privileges:true', '-p', '127.0.0.1::6080', '-p', '127.0.0.1::8081', '--mount', f'type=bind,source={config_dir},target=/config,readonly', '--mount', f'type=bind,source={profile_dir},target=/profile', IMAGE], timeout=60)
+            self._run(['run', '-d', '--name', self.container_name(env_id), '--label', f'workbench.scope={self.scope}', '--label', f'workbench.environment={env_id}', '--shm-size', '512m', '--memory', str(env['memory_limit_mb'])+'m', '--memory-swap', str(env['memory_limit_mb']*2)+'m', '--cpus', str(env['cpu_limit']), '--pids-limit', '512', '--security-opt', 'no-new-privileges:true', '-p', '127.0.0.1::6080', '-p', '127.0.0.1::8081', '--mount', f'type=bind,source={config_dir},target=/config,readonly', *storage, IMAGE], timeout=60)
             deadline = time.monotonic() + 100
             while time.monotonic() < deadline:
                 obj = self._inspect(env_id)
@@ -261,6 +283,7 @@ class Runtime(ResourceControls):
     def delete(self, env_id):
         self.stop(env_id)
         self._run(['rm', '-f', self.container_name(env_id)], check=False)
+        self._run(['volume', 'rm', '-f', self.profile_volume(env_id)], check=False)
         config, _ = self.environment_paths(env_id)
         if config.parent.exists():
             shutil.rmtree(config.parent)
@@ -275,11 +298,17 @@ class Runtime(ResourceControls):
             threading.Thread(target=self._prepare_job, daemon=True).start()
 
     def _open_desktop(self):
-        if __import__('sys').platform != 'darwin':
+        if __import__('sys').platform not in ('darwin', 'win32'):
             raise ValueError('请先启动本机 Docker 服务，再点击一键准备。')
         app = engine_app()
         if not app:
             raise ValueError('已找到 Docker 命令，但它的后台服务没有运行。请先启动你使用的 Docker 服务，再点击重试。')
+        if windows():
+            try:
+                os.startfile(app['path'])
+            except OSError as exc:
+                raise ValueError(f"未能打开 {app['name']}，请检查它是否已正确安装。") from exc
+            return
         result = subprocess.run(['open','-a',app['path']], capture_output=True, timeout=15)
         if result.returncode:
             raise ValueError(f"未能打开 {app['name']}，请检查它是否已正确安装。")
@@ -305,6 +334,9 @@ class Runtime(ResourceControls):
                     time.sleep(2)
                 if not status['docker_ready']:
                     raise ValueError('Docker 仍未就绪。请在 Docker 窗口完成首次启动提示，然后回这里重试。')
+            if status.get('docker_os') == 'windows':
+                # Docker Desktop on Windows can be switched to Windows containers; the browser image is Linux.
+                raise ValueError(WINDOWS_CONTAINERS)
             if status['image_ready']:
                 self.build_state, self.prepare_phase = 'ready', 'ready'
                 self.build_error = None
@@ -340,7 +372,7 @@ class Runtime(ResourceControls):
                 os.chmod(log, 0o600)
                 # docker load accepts gzip/xz/zstd archives; stream it so the
                 # interface can show how far the one-time import has got.
-                process = subprocess.Popen([docker, 'load'], stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT, env=command_env(docker))
+                process = subprocess.Popen([docker, 'load'], stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT, env=command_env(docker), **quiet())
                 try:
                     sent = 0
                     while chunk := source.read(1 << 20):
@@ -384,7 +416,7 @@ class Runtime(ResourceControls):
                 raise ValueError('Docker 尚未启动，请先打开 Docker Desktop。')
             with log.open('w') as output:
                 os.chmod(log, 0o600)
-                p = subprocess.run([self.docker, 'build', '-t', IMAGE, str(ROOT / 'runtime')], stdout=output, stderr=subprocess.STDOUT, timeout=1800, env=command_env(self.docker))
+                p = subprocess.run([self.docker, 'build', '-t', IMAGE, str(ROOT / 'runtime')], stdout=output, stderr=subprocess.STDOUT, timeout=1800, env=command_env(self.docker), **quiet())
             if p.returncode:
                 raise ValueError('浏览器组件构建失败，可重试；详情见本机 build.log。')
             self.build_state, self.prepare_phase = 'ready', 'ready'

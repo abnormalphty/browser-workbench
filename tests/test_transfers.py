@@ -2,6 +2,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import quote
 from fastapi.testclient import TestClient
 from workbench.app import create_app
@@ -96,6 +97,15 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         response = self.client.get(self.base+'/config/launch.json', headers=self.headers)
         self.assertEqual(response.status_code, 400)
+
+
+class WindowsTransferTests(TransferTests):
+    """The same checks through the name-by-name walk used on Windows, which has no dir_fd."""
+    def setUp(self):
+        patcher = patch('workbench.transfers.DIR_FD', False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        super().setUp()
 
 
 if __name__ == '__main__': unittest.main()

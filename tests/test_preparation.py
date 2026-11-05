@@ -33,3 +33,7 @@ class PreparationTests(unittest.TestCase):
   with patch.object(self.r,'status',return_value={'docker_installed':True,'docker_ready':False,'image_ready':False}),patch.object(self.r,'_open_desktop'),patch.object(self.r,'_build_job') as built,patch('workbench.runtime.time.sleep'),patch.object(self.r.monitor,'engine_info'):
    self.r._prepare_job(attempts=2)
   built.assert_not_called();self.assertEqual(self.r.build_state,'error');self.assertIn('Docker',self.r.build_error)
+ def test_windows_containers_mode_asks_to_switch_without_loading_or_building(self):
+  with patch.object(self.r,'status',return_value={'docker_installed':True,'docker_ready':True,'docker_os':'windows','image_ready':False}),patch.object(self.r,'image_archive',return_value='/bundle/browser-runtime.tar.gz'),patch.object(self.r,'_load_image') as loaded,patch.object(self.r,'_build_job') as built:
+   self.r._prepare_job()
+  loaded.assert_not_called();built.assert_not_called();self.assertEqual(self.r.build_state,'error');self.assertIn('Switch to Linux containers',self.r.build_error)

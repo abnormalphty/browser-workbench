@@ -80,6 +80,7 @@ class GeographyTests(unittest.TestCase):
             with sqlite3.connect(path/'workbench.sqlite3') as db:
                 db.execute('CREATE TABLE environments (id TEXT PRIMARY KEY,name TEXT,node_id TEXT,fingerprint_seed TEXT,created_at REAL)')
                 db.execute('INSERT INTO environments VALUES (?,?,?,?,?)',('a'*32,'old',None,'seed',1))
+            db.close()
             store=Store(path)
             self.assertEqual(store.get_environment('a'*32).get('timezone_mode'),'legacy')
             self.assertEqual(store.create_environment('new',None).get('timezone_mode'),'node')

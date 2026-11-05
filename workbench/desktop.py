@@ -1,11 +1,10 @@
-"""Backend process owned by the Mac app.
+"""Backend process owned by the desktop app (macOS or Windows).
 
 The app reads one `WORKBENCH_READY {...}` line from stdout to learn the port,
 and keeps stdin open for as long as it lives: when the app quits or crashes
 the pipe closes and this server shuts down instead of lingering unseen.
 """
 import argparse
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -16,6 +15,7 @@ import threading
 import uvicorn
 
 from . import __version__
+from .system import hold_lock
 
 EXIT_LOCKED = 3
 
@@ -42,10 +42,8 @@ def main(argv=None):
     data_dir = Path(args.data_dir).expanduser()
     data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Two backends on one data folder would race each other's containers.
-    lock = open(data_dir/'.workbench.lock', 'a')
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    lock = hold_lock(data_dir/'.workbench.lock')
+    if lock is None:
         print('WORKBENCH_ERROR '+json.dumps({'code':'locked'}), flush=True)
         return EXIT_LOCKED
     os.environ.setdefault('WORKBENCH_MODE', 'desktop')

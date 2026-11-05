@@ -1,5 +1,5 @@
 """Resource quotas and batched, scope-limited Docker telemetry."""
-import math,os,re,subprocess,threading,time,json
+import math,os,re,threading,time,json
 
 
 def validate_limits(data):
@@ -29,10 +29,8 @@ def occupied_ids(objects,pending):
 class ResourceMonitor:
  def __init__(self,runtime):
   self.runtime=runtime;self.lock=threading.RLock();self.metrics={};self.sampled_at=0;self.info={};self.info_at=0
-  self.host={'cpu_count':os.cpu_count(),'memory_mb':None}
-  if __import__('sys').platform=='darwin':
-   try:self.host['memory_mb']=int(subprocess.check_output(['sysctl','-n','hw.memsize'],text=True,timeout=2,stderr=subprocess.DEVNULL))//1048576
-   except (OSError,ValueError,subprocess.SubprocessError):pass
+  from .system import memory_mb
+  self.host={'cpu_count':os.cpu_count(),'memory_mb':memory_mb()}
  def invalidate(self):
   self.sampled_at=0
  def engine_info(self,force=False):
@@ -42,7 +40,7 @@ class ResourceMonitor:
     p=self.runtime._run(['info','--format','{{json .}}'],timeout=5,check=False)
     if p.returncode:raise ValueError()
     d=json.loads(p.stdout)
-    self.info={'ready':True,'cpu_count':d['NCPU'],'memory_mb':int(d['MemTotal'])//1048576,'version':d['ServerVersion']}
+    self.info={'ready':True,'cpu_count':d['NCPU'],'memory_mb':int(d['MemTotal'])//1048576,'version':d['ServerVersion'],'os_type':d.get('OSType')}
    except (ValueError,KeyError,TypeError,OSError):self.info={'ready':False,'cpu_count':None,'memory_mb':None}
    self.info_at=time.time();return dict(self.info)
  def collect(self,force=False):

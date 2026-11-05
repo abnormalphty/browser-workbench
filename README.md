@@ -6,7 +6,7 @@
 
 ## Mac 应用（v0.7 起，推荐）
 
-下载 `Browser-Workbench-0.7.3-arm64.dmg`（Apple 芯片），打开后把“Browser Workbench”拖进“应用程序”，双击即可在独立窗口中使用，不需要安装 Python、打开终端或浏览器。
+下载 `Browser-Workbench-0.8.0-arm64.dmg`（Apple 芯片），打开后把“Browser Workbench”拖进“应用程序”，双击即可在独立窗口中使用，不需要安装 Python、打开终端或浏览器。
 
 - **首次打开被 macOS 拦截**：当前版本没有 Apple 开发者证书签名。到“系统设置 → 隐私与安全性”，在下方点“仍要打开”，只需一次。
 - **Docker**：浏览器环境仍运行在 Docker 里。应用会自动找到并打开 Docker Desktop（或 OrbStack），然后载入 DMG 自带的浏览器组件，不需要联网构建，也不需要设置 Docker 的代理或镜像源。还没有安装 Docker Desktop 时，应用会给出对应芯片的官方下载链接和步骤。
@@ -16,6 +16,17 @@
 应用内“从电脑粘贴”“复制到电脑”直接使用系统剪贴板，不再出现浏览器权限提示；“下载到电脑”保存到“下载”文件夹；可以把 Finder 里的文件直接拖到环境画面上传入。结构、取舍与构建方法见 [Mac 应用说明](docs/DESKTOP.md) 和 [构建 DMG](docs/BUILD.md)。
 
 Intel Mac 版本尚未构建和验证。
+
+## Windows 版（v0.8 起）
+
+下载 `Browser-Workbench-0.8.0-x64-Setup.exe`，双击安装（只为当前用户安装，不需要管理员权限），从开始菜单或桌面打开。适用于 64 位 Windows 10（22H2）和 Windows 11。
+
+- **首次运行被拦截**：安装包没有代码签名证书，Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”。打开了“智能应用控制”的电脑会直接拦下未签名程序。
+- **Docker**：需要 Docker Desktop（使用 WSL 2、Linux 容器）。没有安装时，应用给出官方下载链接和步骤；装好并打开后自动继续，并载入安装包自带的浏览器组件。Docker Desktop 被切换到“Windows 容器”时，应用会提示切回 Linux 容器。
+- **数据**：数据库、订阅和文件传输文件夹在 `%LOCALAPPDATA%\BrowserWorkbench\Data`，日志在 `...\Logs`；各环境的 Firefox 登录数据放在 Docker 存储卷里（原因见说明）。卸载应用不会删除这些数据。
+- **关闭**：关窗口即退出；有环境在运行时会询问是否一起停止。
+
+结构、数据位置与构建方法见 [Windows 版说明](docs/WINDOWS.md)。Windows 版目前只在 Mac 上完成了构建和模拟验证，尚未在真实 Windows 电脑上验收。
 
 ## 从源码运行（网页版）
 
@@ -114,6 +125,14 @@ docker build -t local-browser-workbench:0.7.0 runtime
 Docker 已安装时，工作台把“启动 Docker → 等待就绪 → 准备浏览器组件”串成一次操作；已有组件会直接复用。Docker 未就绪时不再立即构建失败。页面显示正在等待还是正在准备，超时后可重试。首次启动 Docker 的条款或系统确认仍需使用者自行完成。
 
 此版本未自动修改 Docker 的代理、镜像源、CPU 或内存设置；如果下载或启动仍失败，应按实际错误排查。不要将此改动视为已验证所有内测电脑的网络与资源配置。
+
+## v0.8.0 Windows 版
+
+- 新增 Windows 版：WebView2 窗口、自带 Python 与 x64 浏览器组件、只为当前用户安装的安装程序（NSIS），可在 Mac 上构建。界面、后端与 Mac 版共用。
+- Windows 上各环境的 Firefox 登录数据放在 Docker 存储卷，文件传输文件夹仍在 Windows 数据目录；后台调用 Docker 时不再闪出命令行窗口。
+- 浏览器组件升级到 0.8.0：从 Windows 共享进容器的文件夹不能改所有者时，容器照常启动。Mac 版第一次打开新版时会自动载入一次新组件。
+- 网页界面按系统显示说法（资源管理器 / Finder、Ctrl+V / ⌘V）和 Docker Desktop 的安装步骤。
+- 浏览器组件的构建在网络不稳定时会重试下载并保留已下载的软件包。
 
 ## v0.7.3 自动检测线路位置
 

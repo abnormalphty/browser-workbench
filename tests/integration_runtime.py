@@ -89,8 +89,8 @@ def navigate(runtime, env_id, url):
     return result
 
 
-def wait_report(records, expected):
-    deadline=time.monotonic()+10
+def wait_report(records, expected, timeout=30):
+    deadline=time.monotonic()+timeout
     while time.monotonic()<deadline:
         if any(r.get('note')==expected for r in records):
             return next(r for r in reversed(records) if r.get('note')==expected)
@@ -125,7 +125,7 @@ def main():
             for env in envs:
                 runtime.start(env['id'])
                 wait_ready(runtime,env['id'])
-            results.append('two managed ARM64 browser environments start')
+            results.append('two managed browser environments start')
             fingerprints=[runtime.state(e['id'])['fingerprint'] for e in envs]
             for env,value,records in zip(envs,['alpha','beta'],[records_a,records_b]):
                 r=navigate(runtime,env['id'],'http://workbench.test/remember?'+urlencode({'set':value}))
@@ -167,18 +167,22 @@ def main():
                 stopped=runtime._run(['stop',runtime.container_name(e['id'])],check=False)
                 print('docker stop already-stopped return code:',stopped.returncode,flush=True)
                 runtime.delete(e['id'])
+                assert not (Path(temp)/'environments'/e['id']).exists()
+                assert runtime._run(['volume','inspect',runtime.profile_volume(e['id'])],check=False).returncode!=0, 'profile volume left behind'
             env_ids=[]
             results.append('stopped environments and persistent test data can be deleted')
         finally:
             for env_id in env_ids:
                 try:
                     runtime._run(['rm','-f',runtime.container_name(env_id)],check=False)
+                    if runtime.volume_profiles():
+                        runtime._run(['volume','rm','-f',runtime.profile_volume(env_id)],check=False)
                 except Exception:
                     pass
             for server in [a,b,direct]:
                 try: server.shutdown();server.server_close()
                 except Exception: pass
-            report={'engine':engine,'checks':results,'all_passed':len(results)==7}
+            report={'engine':engine,'profile_storage':'docker volume' if runtime.volume_profiles() else 'data folder','checks':results,'all_passed':len(results)==7}
             (test_root/'results-firefox.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
             print(json.dumps(report,ensure_ascii=False,indent=2),flush=True)
     assert len(results)==7

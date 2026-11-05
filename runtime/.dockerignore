@@ -1,5 +1,6 @@
 *
 !Dockerfile
+!apt-install.sh
 !entrypoint.py
 !browser.py
 !native_firefox.py

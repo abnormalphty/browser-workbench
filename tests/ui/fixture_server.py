@@ -7,6 +7,7 @@ Usage: fixture_server.py OUTPUT_DIR   (writes OUTPUT_DIR/port, OUTPUT_DIR/receiv
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import socketserver
 import sys
 from urllib.parse import unquote, urlsplit
 
@@ -46,7 +47,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+class Server(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind looks up this host's name; behind some VPN or proxy DNS that hangs.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
+server = Server(('127.0.0.1', 0), Handler)
 (OUT/'download-expected.txt').write_bytes(DOWNLOAD)
 (OUT/'port').write_text(str(server.server_port))
 server.serve_forever()
