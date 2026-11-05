@@ -182,7 +182,7 @@ class Geography:
         name='workbench-geo-'+uuid.uuid4().hex[:16]
         try:
             with tempfile.TemporaryDirectory(prefix='location-',dir=self.store.data_dir) as temp:
-                file=Path(temp)/'proxy.yaml';file.write_text(yaml.safe_dump(build_proxy_config(node)));file.chmod(0o600)
+                file=Path(temp)/'proxy.yaml';file.write_text(yaml.safe_dump(build_proxy_config(node)),encoding='utf-8');file.chmod(0o600)
                 result=self.runtime._run(['run','--rm','--name',name,'--label','workbench.location-probe=true','--memory','256m','--cpus','0.5','--pids-limit','64','--security-opt','no-new-privileges:true','--mount',f'type=bind,source={temp},target=/config,readonly','--entrypoint','python',IMAGE,'-c',PROBE_SCRIPT],timeout=40,check=False)
                 if result.returncode:raise ValueError()
                 try:verified=exit_location(json.loads(result.stdout.strip() or '{}'))

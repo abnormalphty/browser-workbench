@@ -163,11 +163,11 @@ class Runtime(ResourceControls):
 
     def worker_secret(self, env_id):
         config, _ = self.environment_paths(env_id)
-        return json.loads((config / 'launch.json').read_text())['worker_secret']
+        return json.loads((config / 'launch.json').read_text(encoding='utf-8'))['worker_secret']
 
     def view_secret(self, env_id):
         config, _ = self.environment_paths(env_id)
-        return json.loads((config / 'launch.json').read_text())['vnc_password']
+        return json.loads((config / 'launch.json').read_text(encoding='utf-8'))['vnc_password']
 
     def state(self, env_id):
         state={'status':'stopped','error':self.errors.get(env_id),'memory_mb':None,'cpu_cores':None,'exit_ip':None,'test_mode':False,'account_checking':env_id in self.account_checking}
@@ -243,7 +243,7 @@ class Runtime(ResourceControls):
             launch = {'environment_id': env_id, 'fingerprint_seed': env['fingerprint_seed'], 'engine': env.get('engine', 'firefox'), 'test_mode': test_mode, 'timezone':timezone, 'worker_secret': secrets.token_urlsafe(32), 'vnc_password': secrets.token_hex(4)}
             for name, payload in [('launch.json', json.dumps(launch)), ('proxy.yaml', yaml.safe_dump(proxy or {}, allow_unicode=True))]:
                 path = config_dir / name
-                path.write_text(payload)
+                path.write_text(payload, encoding='utf-8')
                 os.chmod(path, 0o600)
             self._run(['run', '-d', '--name', self.container_name(env_id), '--label', f'workbench.scope={self.scope}', '--label', f'workbench.environment={env_id}', '--shm-size', '512m', '--memory', str(env['memory_limit_mb'])+'m', '--memory-swap', str(env['memory_limit_mb']*2)+'m', '--cpus', str(env['cpu_limit']), '--pids-limit', '512', '--security-opt', 'no-new-privileges:true', '-p', '127.0.0.1::6080', '-p', '127.0.0.1::8081', '--mount', f'type=bind,source={config_dir},target=/config,readonly', *storage, IMAGE], timeout=60)
             deadline = time.monotonic() + 100

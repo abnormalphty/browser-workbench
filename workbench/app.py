@@ -98,7 +98,7 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
     @app.get('/', response_class=HTMLResponse)
     def home():
         path = ROOT / 'static/index.html'
-        html = path.read_text() if path.exists() else '<!doctype html><meta name="workbench-token" content="__TOKEN__"><title>本地浏览器工作台</title>'
+        html = path.read_text(encoding='utf-8') if path.exists() else '<!doctype html><meta name="workbench-token" content="__TOKEN__"><title>本地浏览器工作台</title>'
         response = HTMLResponse(html.replace('__TOKEN__', token))
         response.set_cookie('workbench_session', token, httponly=True, samesite='strict', path='/')
         return response

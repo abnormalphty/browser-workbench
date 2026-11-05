@@ -14,6 +14,10 @@ def on_windows():
     return patch('sys.platform', 'win32')
 
 
+def on_mac():
+    return patch('sys.platform', 'darwin')
+
+
 class WindowsDockerTests(unittest.TestCase):
     def test_docker_desktop_is_found_where_its_installer_puts_it(self):
         exe = docker_env.WINDOWS_CLI[0]
@@ -38,7 +42,8 @@ class WindowsDockerTests(unittest.TestCase):
     def test_child_processes_never_open_a_console_window(self):
         with on_windows():
             self.assertEqual(system.quiet(), {'creationflags': 0x08000000})
-        self.assertEqual(system.quiet(), {})
+        with on_mac():
+            self.assertEqual(system.quiet(), {})
 
     def test_folders_and_docker_desktop_open_through_the_shell(self):
         with on_windows(), patch('os.startfile', create=True) as start:
@@ -71,7 +76,8 @@ class WindowsFileNameTests(unittest.TestCase):
         for name in ['报告 (2).pdf', 'console.txt', 'a.b.c']:
             with self.subTest(name=name), on_windows():
                 self.assertEqual(checked_name(name), name)
-        self.assertEqual(checked_name('a:b.txt'), 'a:b.txt')  # a valid name on the Mac
+        with on_mac():
+            self.assertEqual(checked_name('a:b.txt'), 'a:b.txt')  # a valid name on the Mac
 
 
 class WindowsProfileStorageTests(unittest.TestCase):
@@ -109,8 +115,9 @@ class WindowsProfileStorageTests(unittest.TestCase):
         self.assertTrue((profile/'transfer'/'incoming').is_dir() and (profile/'transfer'/'downloads').is_dir())
 
     def test_mac_keeps_the_whole_profile_in_the_data_folder(self):
-        self.assertFalse(self.runtime.volume_profiles())
-        run = next(c for c in self.start() if c[0] == 'run')
+        with on_mac():
+            self.assertFalse(self.runtime.volume_profiles())
+            run = next(c for c in self.start() if c[0] == 'run')
         _, profile = self.runtime.environment_paths(self.env['id'])
         self.assertIn(f'type=bind,source={profile},target=/profile', run)
         self.assertFalse(any('type=volume' in part for part in run))

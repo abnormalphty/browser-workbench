@@ -13,7 +13,7 @@ def check_account(runtime,env_id):
   if env_id in runtime.jobs and runtime.jobs[env_id].is_alive():raise ValueError('请等待环境启动完成。')
   runtime.account_checking.add(env_id)
  try:
-  source=(Path(__file__).resolve().parents[1]/'runtime/account_info.py').read_text()
+  source=(Path(__file__).resolve().parents[1]/'runtime/account_info.py').read_text(encoding='utf-8')
   result=runtime._run(['exec','-i','--user','1000','--env','DISPLAY=:99',runtime.container_name(env_id),'python','-'],timeout=60,check=False,input_text=source)
   data=json.loads(result.stdout) if result.returncode==0 else {}
   if not isinstance(data,dict):data={}

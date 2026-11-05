@@ -7,7 +7,7 @@
 | 组件 | 用途 | 许可证 | 上游 |
 | --- | --- | --- | --- |
 | CPython 3.12（python-build-standalone 构建） | 运行工作台后端 | PSF License（构建脚本 BSD-3-Clause），内含 OpenSSL（Apache-2.0）、SQLite（公共领域）等 | https://www.python.org/ ・ https://github.com/astral-sh/python-build-standalone |
-| FastAPI / Starlette / Pydantic / Uvicorn / HTTPX / httpcore / h11 / anyio / websockets / PyYAML / certifi 等 | 本机 HTTP 服务与依赖 | MIT、BSD、MPL-2.0（certifi）等，详见各包 `*.dist-info` 中的许可文件 | PyPI 对应项目 |
+| FastAPI / Starlette / Pydantic / Uvicorn / HTTPX / httpcore / h11 / anyio / websockets / PyYAML / certifi / tzdata 等 | 本机 HTTP 服务与依赖；tzdata 提供 IANA 时区数据（Windows 没有系统自带的一份） | MIT、BSD、MPL-2.0（certifi）、Apache-2.0（tzdata，其中的 IANA 时区数据属公有领域）等，详见各包 `*.dist-info` 中的许可文件 | PyPI 对应项目 |
 
 ## 随 Windows 版附带
 

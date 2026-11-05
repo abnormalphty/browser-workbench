@@ -11,6 +11,8 @@ permissions:
 jobs:
   backend:
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'  # both apps start Python with -X utf8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,6 +44,9 @@ jobs:
           Get-ChildItem $app
           if (-not (Test-Path (Join-Path $app 'BrowserWorkbench.exe'))) { throw 'not installed' }
           if (-not (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Browser Workbench.lnk'))) { throw 'no Start menu shortcut' }
+          # Windows has no system time zone database: the bundled Python must bring its own.
+          & (Join-Path $app 'python\python.exe') -E -s -X utf8 -c "import zoneinfo; print(zoneinfo.ZoneInfo('Asia/Tokyo'), zoneinfo.ZoneInfo('America/New_York'))"
+          if ($LASTEXITCODE -ne 0) { throw 'the bundled Python cannot read time zones' }
       - name: Start the app and run the self-test
         shell: pwsh
         run: |
