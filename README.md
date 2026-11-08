@@ -6,7 +6,7 @@
 
 ## Mac 应用（v0.7 起，推荐）
 
-下载 `Browser-Workbench-0.8.0-arm64.dmg`（Apple 芯片），打开后把“Browser Workbench”拖进“应用程序”，双击即可在独立窗口中使用，不需要安装 Python、打开终端或浏览器。
+从 [v0.7.3 发布页](https://github.com/abnormalphty/browser-workbench/releases/tag/v0.7.3) 下载 `Browser-Workbench-0.7.3-arm64.dmg`（Apple 芯片；Mac 版 0.8.0 还没有发布），打开后把“Browser Workbench”拖进“应用程序”，双击即可在独立窗口中使用，不需要安装 Python、打开终端或浏览器。
 
 - **首次打开被 macOS 拦截**：当前版本没有 Apple 开发者证书签名。到“系统设置 → 隐私与安全性”，在下方点“仍要打开”，只需一次。
 - **Docker**：浏览器环境仍运行在 Docker 里。应用会自动找到并打开 Docker Desktop（或 OrbStack），然后载入 DMG 自带的浏览器组件，不需要联网构建，也不需要设置 Docker 的代理或镜像源。还没有安装 Docker Desktop 时，应用会给出对应芯片的官方下载链接和步骤。
@@ -19,7 +19,7 @@ Intel Mac 版本尚未构建和验证。
 
 ## Windows 版（v0.8 起）
 
-下载 `Browser-Workbench-0.8.0-x64-Setup.exe`，双击安装（只为当前用户安装，不需要管理员权限），从开始菜单或桌面打开。适用于 64 位 Windows 10（22H2）和 Windows 11。
+从 [v0.8.0 发布页](https://github.com/abnormalphty/browser-workbench/releases/tag/v0.8.0) 下载 `Browser-Workbench-0.8.0-x64-Setup.exe`，双击安装（只为当前用户安装，不需要管理员权限），从开始菜单或桌面打开。适用于 64 位 Windows 10（22H2）和 Windows 11。
 
 - **首次运行被拦截**：安装包没有代码签名证书，Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”。打开了“智能应用控制”的电脑会直接拦下未签名程序。
 - **Docker**：需要 Docker Desktop（使用 WSL 2、Linux 容器）。没有安装时，点“同意并自动安装”，应用会完成全部准备：
@@ -135,7 +135,7 @@ Docker 已安装时，工作台把“启动 Docker → 等待就绪 → 准备�
 
 - 新增 Windows 版：WebView2 窗口、自带 Python 与 x64 浏览器组件、只为当前用户安装的安装程序（NSIS），可在 Mac 上构建。界面、后端与 Mac 版共用。
 - Windows 上各环境的 Firefox 登录数据放在 Docker 存储卷，文件传输文件夹仍在 Windows 数据目录；后台调用 Docker 时不再闪出命令行窗口。
-- 浏览器组件升级到 0.8.0：从 Windows 共享进容器的文件夹不能改所有者时，容器照常启动。Mac 版第一次打开新版时会自动载入一次新组件。
+- 浏览器组件升级到 0.8.0：从 Windows 共享进容器的文件夹不能改所有者时，容器照常启动。Mac 版 0.8.0 发布后，第一次打开时会自动载入一次新组件。
 - 网页界面按系统显示说法（资源管理器 / Finder、Ctrl+V / ⌘V）和 Docker Desktop 的安装步骤。
 - Windows 上可以一键安装 Docker Desktop：
   - 从 Docker 官网下载，断线后能续传，并核对 Docker 的数字签名；
