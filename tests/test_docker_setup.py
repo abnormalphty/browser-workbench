@@ -119,6 +119,16 @@ class SignatureTests(unittest.TestCase):
         with patch('sys.platform', 'darwin'):
             self.assertFalse(docker_setup.verify(Path('x.exe')))
 
+    def test_windows_powershell_gets_its_own_module_path(self):
+        # Started from PowerShell 7 (GitHub's runner, some PCs), Windows PowerShell could not find Get-AuthenticodeSignature.
+        answer = SimpleNamespace(returncode=0, stdout=b'{"status":"Valid"}', stderr=b'')
+        with on_windows(), patch.dict(os.environ, {'PSModulePath': r'C:\Program Files\PowerShell\7\Modules'}), \
+             patch('subprocess.run', return_value=answer) as run:
+            self.assertEqual(docker_setup.powershell('script', {'WORKBENCH_SIGNED_FILE': 'x.exe'}), {'status': 'Valid'})
+        env = run.call_args.kwargs['env']
+        self.assertNotIn('PSMODULEPATH', {key.upper() for key in env})
+        self.assertEqual(env['WORKBENCH_SIGNED_FILE'], 'x.exe')
+
     def test_signer_names(self):
         self.assertEqual(docker_setup.signer_name('CN=Docker Inc, O=Docker Inc'), 'Docker Inc')
         self.assertEqual(docker_setup.signer_name('CN="Docker, Inc.", O=Docker'), 'Docker, Inc.')

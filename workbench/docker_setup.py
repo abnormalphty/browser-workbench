@@ -84,9 +84,12 @@ def log(message):
 def powershell(script, extra_env=None, timeout=60):
     """Runs one of the fixed scripts above, which print a JSON object; values reach it through the environment."""
     exe = Path(os.environ.get('SystemRoot', r'C:\Windows'))/'System32'/'WindowsPowerShell'/'v1.0'/'powershell.exe'
+    # A PSModulePath inherited from PowerShell 7 makes Windows PowerShell load PowerShell 7's modules, which
+    # it cannot (Get-AuthenticodeSignature goes missing); without it, Windows PowerShell uses its own.
+    env = {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
     result = subprocess.run([str(exe), '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
                             capture_output=True, stdin=subprocess.DEVNULL, timeout=timeout,
-                            env={**os.environ, **(extra_env or {})}, **quiet())
+                            env={**env, **(extra_env or {})}, **quiet())
     if result.returncode:
         raise OSError(result.stderr.decode('utf-8', 'replace').strip()[-300:])
     return json.loads(result.stdout.decode('utf-8', 'replace').strip() or '{}')

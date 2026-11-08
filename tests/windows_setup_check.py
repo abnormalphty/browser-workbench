@@ -30,11 +30,27 @@ check('Docker Desktop folders', [root.parts[-1] for root in docker_env.windows_r
       ', '.join(str(root) for root in docker_env.windows_roots()))
 
 system32 = Path(os.environ['SystemRoot']) / 'System32'
+
+
+def signature(path):
+    """The raw answer, so a refusal below cannot come from a check that never ran."""
+    try:
+        return docker_setup.powershell(docker_setup.VERIFY_SCRIPT, {'WORKBENCH_SIGNED_FILE': str(path)}, timeout=300)
+    except Exception as error:  # noqa: BLE001 - reported as a failed check
+        return {'error': str(error)[:300]}
+
+
+# This step runs under PowerShell 7, whose module path once hid Get-AuthenticodeSignature from Windows PowerShell.
+notepad = signature(system32 / 'notepad.exe')
+check('the signature check runs (from PowerShell 7 too)', notepad.get('status') == 'Valid' and 'Microsoft' in notepad.get('subject', ''),
+      json.dumps(notepad))
 check('a Microsoft-signed program is not taken for Docker', not docker_setup.verify(system32 / 'notepad.exe'))
 with tempfile.TemporaryDirectory() as folder:
     fake = Path(folder) / 'Docker Desktop Installer.exe'
     fake.write_bytes(b'MZ not really a program')
-    check('an unsigned file is refused', not docker_setup.verify(fake))
+    unsigned = signature(fake)
+    check('an unsigned file is refused', 'status' in unsigned and unsigned['status'] != 'Valid' and not docker_setup.verify(fake),
+          json.dumps(unsigned))
 
     app = Path(folder) / 'BrowserWorkbench.exe'
     app.write_bytes(b'')
