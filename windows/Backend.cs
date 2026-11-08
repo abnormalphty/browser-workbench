@@ -83,6 +83,8 @@ namespace BrowserWorkbench
                 ["WORKBENCH_CONTROL_TOKEN"] = ControlToken,
                 ["WORKBENCH_MODE"] = "desktop",
                 ["WORKBENCH_APP_VERSION"] = AppPaths.Version,
+                // Docker Desktop setup reopens the app once after the restart WSL needs (docker_setup.py).
+                ["WORKBENCH_APP_EXE"] = System.Windows.Forms.Application.ExecutablePath,
             };
             if (AppPaths.ImageArchive != null) extra["WORKBENCH_IMAGE_ARCHIVE"] = AppPaths.ImageArchive;
             var started = new Process

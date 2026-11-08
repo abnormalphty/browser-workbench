@@ -13,7 +13,7 @@ if(native)document.documentElement.classList.add('native-app', onWindows ? 'nati
 // The same page runs in the Mac app, the Windows app and a browser: name each system's own tools.
 document.querySelectorAll('[data-open-transfer]').forEach(button=>button.textContent=`在 ${fileManager} 中打开 ↗`);
 if(onWindows){
-  $('runtimeInstall').innerHTML='<li>点下方“下载 Docker Desktop”，运行下载好的 Docker Desktop Installer.exe，保持“Use WSL 2”勾选，按提示完成安装；要求重启电脑时请重启。</li><li>打开 Docker Desktop，同意它的服务条款；登录和问卷可以跳过。提示安装或更新 WSL、或在 BIOS 里开启虚拟化时，按它的说明操作。</li><li>回到 Browser Workbench：它会自动连上 Docker，并载入自带的浏览器组件。</li>';
+  $('runtimeInstall').innerHTML='<li>点下方“下载 Docker Desktop”，运行下载好的 Docker Desktop Installer.exe，按默认选项（只为当前用户安装）完成安装；要求开启 WSL 或重启电脑时按提示操作。</li><li>打开 Docker Desktop，同意它的服务条款；登录和问卷可以跳过。提示安装或更新 WSL、或在 BIOS 里开启虚拟化时，按它的说明操作。</li><li>回到 Browser Workbench：它会自动连上 Docker，并载入自带的浏览器组件。</li>';
   $('dockerGuide').href='https://docs.docker.com/desktop/setup/install/windows-install/';
 }
 function openExternal(url){if(native)native.call('openExternal',{url}).catch(()=>{});else window.open(url,'_blank','noopener,noreferrer');}
@@ -62,25 +62,73 @@ function toast(message,error=false,action=null){const t=$('toast'),host=[...docu
 function setPage(page){currentPage=page;$('environmentPage').hidden=page!=='environments';$('nodesPage').hidden=page!=='nodes';$('informationPage').hidden=page!=='information';$('breadcrumbCurrent').textContent=page==='nodes'?'订阅与线路':page==='information'?'账号与资源':'浏览器环境';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===page));}
 function showDialog(id){if(!$(id).open)$(id).showModal();}
 function hideDialog(id){$(id).close();}
+// Windows can install Docker Desktop from here (docker_setup.py): steps only the user can take come as
+// docker_setup.step — 'wsl' (one administrator prompt), 'restart', 'virtualization' or 'windows'.
+let wslBusy=false;
 function updateRuntime(){
-  const r=state.runtime;
+  const r=state.runtime, setup=r.docker_setup, auto=!r.docker_installed&&!!setup;
   const ready=r.docker_ready&&r.image_ready;
   const engine=r.engine_app||'Docker';
-  const phases={checking:'正在检查运行组件',starting_docker:`正在打开 ${engine}`,waiting_docker:`等待 ${engine} 就绪`,loading_image:'正在载入浏览器组件',building:'正在准备浏览器组件'};
+  const phases={checking:'正在检查运行组件',checking_system:'正在检查这台电脑',downloading_docker:'正在下载 Docker Desktop',installing_docker:'正在安装 Docker Desktop',starting_docker:`正在打开 ${engine}`,waiting_docker:`等待 ${engine} 就绪`,switching_engine:'正在切换到 Linux 容器',loading_image:'正在载入浏览器组件',building:'正在准备浏览器组件'};
   const preparing=r.build_state==='building';
-  const progress=r.prepare_phase==='loading_image'&&r.prepare_progress!=null?` ${r.prepare_progress}%`:'';
+  const progress=['loading_image','downloading_docker'].includes(r.prepare_phase)&&r.prepare_progress!=null?` ${r.prepare_progress}%`:'';
   const phaseTitle=(phases[r.prepare_phase]||'正在准备运行组件')+progress;
-  $('sidebarStatus').textContent=ready?'运行组件已就绪':preparing?phaseTitle:!r.docker_installed?'需要安装 Docker':r.docker_ready?'浏览器组件待准备':'运行组件未就绪';
+  const step=auto?setup.step:null;
+  const megabytes=value=>Math.round((value||0)/1048576);
+  const downloaded=auto&&setup.total?`已下载 ${megabytes(setup.downloaded)} / ${megabytes(setup.total)} MB。`:'';
+  const stepTitle={wsl:'还差一步：开启 WSL 2',restart:'重启电脑后继续安装',virtualization:'需要开启 CPU 虚拟化',windows:'需要更新 Windows'}[step];
+  $('sidebarStatus').textContent=ready?'运行组件已就绪':wslBusy?'正在开启 WSL 2':stepTitle||(preparing?phaseTitle:!r.docker_installed?'需要安装 Docker':r.docker_ready?'浏览器组件待准备':'运行组件未就绪');
   $('sidebarDot').className='dot '+(ready?'green':'amber');
   $('setupBanner').hidden=ready;
-  $('setupTitle').textContent=preparing?phaseTitle:!r.docker_installed?'首次使用，先安装 Docker Desktop':r.build_state==='error'?'组件准备需要重试':r.docker_ready?'还差一步，准备浏览器组件':'首次使用，准备运行组件';
-  $('setupDescription').textContent=preparing?(r.prepare_phase==='waiting_docker'?`如果 ${engine} 弹出首次使用提示（服务条款等，登录可跳过），请在它的窗口完成；完成后工作台会自动继续。`:r.prepare_phase==='loading_image'?'正在把应用自带的浏览器组件载入 Docker。只需一次，不用联网下载。':r.prepare_phase==='building'?'正在联网准备浏览器组件，首次下载需要一些时间。':'工作台会自动启动后台服务，再继续准备浏览器组件。'):!r.docker_installed?'浏览器环境运行在 Docker 里。点“查看状态”按步骤安装，装好后回到这里会自动继续。':r.build_error||'点击一键准备，自动完成后台启动与浏览器组件准备。';
+  $('setupTitle').textContent=wslBusy?'正在开启 WSL 2':stepTitle||(preparing?phaseTitle:!r.docker_installed?(auto?(setup.terms_accepted&&r.build_error?'自动安装需要重试':'首次使用，自动安装 Docker Desktop'):'首次使用，先安装 Docker Desktop'):r.build_state==='error'?'组件准备需要重试':r.docker_ready?'还差一步，准备浏览器组件':'首次使用，准备运行组件');
+  const busyText={checking_system:'正在检查 Windows 版本、虚拟化和 WSL 2。',downloading_docker:`下载完会自动安装 Docker Desktop。${downloaded}`,installing_docker:'只为当前 Windows 用户安装，约需几分钟，完成后会自动启动 Docker Desktop。',waiting_docker:`如果 ${engine} 弹出首次使用提示（服务条款等，登录可跳过），请在它的窗口完成；完成后工作台会自动继续。`,switching_engine:'浏览器组件需要 Linux 容器，正在让 Docker Desktop 自动切换。',loading_image:'正在把应用自带的浏览器组件载入 Docker。只需一次，不用联网下载。',building:'正在联网准备浏览器组件，首次下载需要一些时间。'};
+  $('setupDescription').textContent=wslBusy?'请在“用户账户控制”窗口点“是”。命令行窗口会显示进度，完成后自动关闭。':step?setup.message+(preparing&&downloaded?` ${downloaded}`:''):preparing?(busyText[r.prepare_phase]||'工作台会自动启动后台服务，再继续准备浏览器组件。'):!r.docker_installed?(auto?(setup.terms_accepted&&r.build_error?r.build_error:'浏览器环境运行在 Docker 里。点“查看状态”，工作台可以自动下载并安装 Docker Desktop。'):'浏览器环境运行在 Docker 里。点“查看状态”按步骤安装，装好后回到这里会自动继续。'):r.build_error||'点击一键准备，自动完成后台启动与浏览器组件准备。';
   const memory=state.resources?.engine?.memory_mb;
-  $('runtimeChecklist').innerHTML=[['Docker',r.docker_installed?(r.engine_app||'已安装'):'待安装'],['后台运行状态',r.docker_ready?'已启动':'未启动'],['浏览器与画面组件',r.image_ready?'已就绪':preparing&&['loading_image','building'].includes(r.prepare_phase)?'准备中…'+progress:'待准备'],...(r.docker_ready&&memory?[['Docker 可分配内存',`${gigabytes(memory)} · 约可同时运行 ${Math.max(1,Math.floor((memory-512)/2048))} 个 2 GB 环境`]]:[])].map(([title,value])=>`<div class="runtime-check">${title}<span>${esc(value)}</span></div>`).join('');
-  $('runtimeInstall').hidden=r.docker_installed;
-  $('runtimeError').hidden=!r.build_error;$('runtimeError').textContent=r.build_error||'';
-  $('runtimePrimary').disabled=preparing;
-  $('runtimePrimary').textContent=ready?'组件已就绪':!r.docker_installed?'下载 Docker Desktop':preparing?'正在准备…':r.build_state==='error'?'重试一键准备':'一键准备运行组件';
+  const dockerValue=r.docker_installed?(r.engine_app||'已安装'):preparing&&r.prepare_phase==='downloading_docker'?'下载中'+progress+(auto&&setup.total?` · ${megabytes(setup.downloaded)} / ${megabytes(setup.total)} MB`:''):preparing&&r.prepare_phase==='installing_docker'?'安装中…':auto&&setup.total&&setup.downloaded>=setup.total?'安装包已下载':'待安装';
+  const wslRow=auto&&setup.wsl?[['WSL 2',{ready:'已开启',wsl:wslBusy?'正在开启…':'需要开启',restart:'重启后生效'}[setup.wsl]]]:[];
+  $('runtimeChecklist').innerHTML=[['Docker',dockerValue],...wslRow,['后台运行状态',r.docker_ready?'已启动':'未启动'],['浏览器与画面组件',r.image_ready?'已就绪':preparing&&['loading_image','building'].includes(r.prepare_phase)?'准备中…'+progress:'待准备'],...(r.docker_ready&&memory?[['Docker 可分配内存',`${gigabytes(memory)} · 约可同时运行 ${Math.max(1,Math.floor((memory-512)/2048))} 个 2 GB 环境`]]:[])].map(([title,value])=>`<div class="runtime-check">${title}<span>${esc(value)}</span></div>`).join('');
+  $('runtimeInstall').hidden=r.docker_installed||auto;
+  $('runtimeAuto').hidden=!auto||setup.terms_accepted;
+  $('manualDocker').hidden=!auto;
+  // A step the user must take is guidance, not a failure; an unrelated error (a broken download) still shows.
+  // Before the user agreed, the backend's "install Docker first" is what the panel above already offers.
+  const notice=auto&&!setup.terms_accepted?'':step?[r.build_error&&r.build_error!==setup.message?r.build_error:'',setup.message].filter(Boolean).join('\n'):r.build_error;
+  $('runtimeError').hidden=!notice;$('runtimeError').textContent=notice||'';$('runtimeError').className='inline-message'+(['wsl','restart'].includes(step)?'':' error');
+  let label,disabled=false;
+  if(ready)label='组件已就绪';
+  else if(auto){
+    if(wslBusy){label='正在开启 WSL 2…';disabled=true;}
+    else if(!setup.terms_accepted)label='同意并自动安装';
+    else if(step==='wsl')label=native?'开启 WSL 2（需要管理员授权）':'查看开启方法';
+    else if(step==='restart'&&native)label='立即重启电脑';
+    else if(preparing){label='正在自动安装…';disabled=true;}
+    else label=step?'重新检查':r.build_state==='error'?'重试自动安装':'继续自动安装';
+  }else{label=!r.docker_installed?'下载 Docker Desktop':preparing?'正在准备…':r.build_state==='error'?'重试一键准备':'一键准备运行组件';disabled=preparing;}
+  $('runtimePrimary').textContent=label;$('runtimePrimary').disabled=disabled;
+}
+async function dockerSetup(body={}){
+  const result=await api('runtime/docker-setup',{method:'POST',body});
+  state.runtime.docker_setup=result.docker_setup;state.runtime.build_state=state.runtime.docker_installed?state.runtime.build_state:'building';updateRuntime();
+  return result.docker_setup;
+}
+// The window asks Windows for the one administrator step; the backend checks the outcome itself.
+async function enableWsl(){
+  if(!native){toast('请在开始菜单搜索 PowerShell，右键“以管理员身份运行”，输入 wsl --install --no-distribution 并回车；完成后重启电脑，再打开本应用。',true,null);return;}
+  wslBusy=true;updateRuntime();
+  try{
+    const result=await native.call('setup.enableWsl');
+    if(result?.cancelled){toast('开启 WSL 2 需要管理员授权。请再点一次，并在“用户账户控制”窗口点“是”。',true);return;}
+    const setup=await dockerSetup({wsl_requested:true});
+    toast(setup.step==='restart'?'WSL 2 已开启，重启电脑后生效。':'WSL 2 已开启，正在继续安装 Docker Desktop。');
+  }catch(e){toast(e.message,true);}
+  finally{wslBusy=false;updateRuntime();await refresh();}
+}
+function confirmRestart(){
+  $('confirmTitle').textContent='现在重启电脑？';
+  $('confirmMessage').textContent='WSL 2 要重启后才生效。请先保存其他程序里的工作。重启后 Browser Workbench 会自动打开，继续安装 Docker Desktop。';
+  $('confirmAction').textContent='立即重启';$('confirmAction').className='button primary';
+  $('confirmAction').onclick=async()=>{try{await native.call('setup.restart');hideDialog('confirmDialog');}catch(e){toast(e.message,true);}};
+  showDialog('confirmDialog');
 }
 function renderEnvironments(){
   const all=state.environments, query=$('environmentSearch').value.trim().toLowerCase();
@@ -177,7 +225,7 @@ async function openBrowser(id){
   const view=await api(`environments/${id}/view`);activeId=id;$('browserName').textContent=env.name;$('browserMode').textContent=env.runtime.test_mode?'无代理测试':'运行中';$('browserFrame').src=view.url;$('browserAddress').value=env.runtime.url?.startsWith('http')?env.runtime.url:'';$('browserView').hidden=false;document.body.style.overflow='hidden';
 }
 function confirmDelete(id){
-  const env=state.environments.find(e=>e.id===id);$('confirmTitle').textContent='删除这个环境？';$('confirmMessage').textContent=`“${env.name}”的登录记录、浏览器数据和已下载文件会被清除。这个操作无法撤回。`;
+  const env=state.environments.find(e=>e.id===id);$('confirmTitle').textContent='删除这个环境？';$('confirmAction').textContent='确认删除';$('confirmAction').className='button danger';$('confirmMessage').textContent=`“${env.name}”的登录记录、浏览器数据和已下载文件会被清除。这个操作无法撤回。`;
   $('confirmAction').onclick=async()=>{try{await api(`environments/${id}?confirm=${id}`,{method:'DELETE'});hideDialog('confirmDialog');toast('环境已删除。');await refresh();}catch(e){toast(e.message,true);}};showDialog('confirmDialog');
 }
 async function browserAction(kind,extra={}){if(!activeId)return;return api(`environments/${activeId}/action`,{method:'POST',body:{kind,...extra}});}
@@ -223,8 +271,16 @@ $('refreshSubscription').onclick=async()=>{try{$('refreshSubscription').disabled
 $('toggleUrl').onclick=()=>$('subscriptionUrl').type=$('subscriptionUrl').type==='password'?'text':'password';
 $('runtimeButton').onclick=$('setupAction').onclick=()=>{updateRuntime();showDialog('runtimeDialog');};
 $('runtimePrimary').onclick=async()=>{
-  try{const r=state.runtime;if(!r.docker_installed){openExternal(r.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。安装并打开后，工作台会自动继续。');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
+  try{const r=state.runtime,setup=r.docker_setup;
+    if(!r.docker_installed&&setup){
+      if(!setup.terms_accepted){const next=await dockerSetup({accept_terms:true});toast('已开始自动安装 Docker Desktop。');if(next.step==='wsl'&&native)await enableWsl();return;}
+      if(setup.step==='wsl'){await enableWsl();return;}
+      if(setup.step==='restart'&&native){confirmRestart();return;}
+      await dockerSetup();toast('正在继续自动安装 Docker Desktop。');return;
+    }
+    if(!r.docker_installed){openExternal(r.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。安装并打开后，工作台会自动继续。');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
 };
+$('manualDocker').onclick=()=>{openExternal(state.runtime.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。按默认选项装好后，工作台会自动继续。');};
 $('exitBrowser').onclick=()=>{$('browserView').hidden=true;$('browserFrame').src='about:blank';activeId=null;document.body.style.overflow='';refresh();};
 $('reconnectBrowser').onclick=async()=>{try{await openBrowser(activeId);}catch(e){toast(e.message,true);}};
 $('addressForm').onsubmit=async e=>{e.preventDefault();try{await browserAction('navigate',{url:$('browserAddress').value});}catch(error){toast(error.message,true);}};

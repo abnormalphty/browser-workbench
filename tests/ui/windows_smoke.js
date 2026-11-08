@@ -41,6 +41,13 @@ try {
   showDialog('runtimeDialog'); updateRuntime(); await sleep(500);
   await native.call('test.snapshot', {name: '02-docker-guidance'});
   hideDialog('runtimeDialog');
+
+  // The one administrator step of the Docker Desktop setup (Virtual Machine Platform and WSL). GitHub's
+  // machines grant it without a prompt; Docker Desktop itself is never installed here.
+  const began = Date.now();
+  const wsl = await Promise.race([native.call('setup.enableWsl'), sleep(9 * 60000).then(() => ({timeout: true}))]);
+  step('WSL step runs Windows tools elevated and reports back', wsl && wsl.ok === true && Number.isInteger(wsl.code),
+    JSON.stringify({...wsl, seconds: Math.round((Date.now() - began) / 1000)}));
 } catch (error) {
   step('test aborted', false, error?.message || error);
 }

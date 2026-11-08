@@ -229,6 +229,24 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
         runtime.build()
         return {'ok':True}
 
+    @app.post('/api/runtime/docker-setup')
+    async def docker_setup(request: Request):
+        """Windows: install Docker Desktop from the app. accept_terms records that the user agreed to
+        Docker's terms; wsl_requested that the window just ran the WSL step (MainForm.cs)."""
+        data = await body(request)
+        if sys.platform != 'win32':
+            raise ValueError('自动安装 Docker Desktop 目前只在 Windows 版提供。')
+        if data.get('accept_terms') is True:
+            runtime.setup.accept()
+        if not runtime.setup.accepted():
+            raise ValueError('请先阅读并同意 Docker 订阅服务协议。')
+        if data.get('wsl_requested') is True:
+            runtime.setup.wsl_requested()
+        # Answer with the step right away (the page asks for WSL at once); a running setup looks again before installing.
+        await asyncio.to_thread(runtime.setup.check)
+        runtime.build()
+        return {'ok':True,'docker_setup':runtime.setup.status()}
+
     @app.get('/api/environments/{env_id}/view')
     def view(env_id: str):
         store.get_environment(env_id)

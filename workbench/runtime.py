@@ -12,6 +12,7 @@ import httpx
 import yaml
 
 from .docker_env import command_env, download_url, engine_app, find_cli
+from .docker_setup import DockerSetup, SetupBlocked
 from .system import quiet, windows
 
 # Bump with runtime/Dockerfile's label whenever files under runtime/ change.
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ENGINE_WAIT_SECONDS = 600
 
 
-WINDOWS_CONTAINERS = ('Docker Desktop 现在使用的是 Windows 容器，浏览器环境需要 Linux 容器。请在屏幕右下角任务栏的 Docker 图标上点右键，'
+WINDOWS_CONTAINERS = ('Docker Desktop 现在使用的是 Windows 容器，浏览器环境需要 Linux 容器，自动切换没有成功。请在屏幕右下角任务栏的 Docker 图标上点右键，'
                       '选择“Switch to Linux containers…”，切换完成后点重试。')
 
 
@@ -53,6 +54,7 @@ class Runtime(ResourceControls):
         self.build_error = None
         self.prepare_phase = 'idle'
         self.prepare_progress = None
+        self.setup = DockerSetup(store.data_dir)
         self.scope = __import__('hashlib').sha256(str(store.data_dir).encode()).hexdigest()[:12]
         from .geography import Geography
         self.geography = Geography(store,self)
@@ -111,7 +113,9 @@ class Runtime(ResourceControls):
             try:image=self._run(['image','inspect',IMAGE],timeout=5,check=False).returncode==0
             except ValueError:pass
         app=engine_app()
-        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'docker_os':info.get('os_type'),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'prepare_progress':self.prepare_progress,'engine_app':app['name'] if app else None,'image_bundled':bool(self.image_archive()),'docker_download_url':download_url(),'max_running':self.store.resource_settings()['max_running']}
+        return {'docker_installed':installed,'docker_ready':bool(info.get('ready')),'docker_os':info.get('os_type'),'image_ready':image,'build_state':self.build_state,'build_error':self.build_error,'prepare_phase':self.prepare_phase,'prepare_progress':self.prepare_progress,'engine_app':app['name'] if app else None,'image_bundled':bool(self.image_archive()),'docker_download_url':download_url(),'max_running':self.store.resource_settings()['max_running'],
+                # Windows only: Docker Desktop can be installed from the app (see docker_setup.py).
+                'docker_setup':self.setup.status() if windows() else None}
 
     def container_name(self, env_id):
         self.store.valid_id(env_id)
@@ -301,6 +305,14 @@ class Runtime(ResourceControls):
         if __import__('sys').platform not in ('darwin', 'win32'):
             raise ValueError('请先启动本机 Docker 服务，再点击一键准备。')
         app = engine_app()
+        if not app and windows() and self.docker:
+            # Docker Desktop somewhere unexpected: its own CLI plugin can still start it.
+            try:
+                started = subprocess.run([self.docker, 'desktop', 'start', '--detach'], capture_output=True, stdin=subprocess.DEVNULL, timeout=60, env=command_env(self.docker), **quiet())
+                if started.returncode == 0:
+                    return
+            except (OSError, subprocess.SubprocessError):
+                pass
         if not app:
             raise ValueError('已找到 Docker 命令，但它的后台服务没有运行。请先启动你使用的 Docker 服务，再点击重试。')
         if windows():
@@ -313,11 +325,67 @@ class Runtime(ResourceControls):
         if result.returncode:
             raise ValueError(f"未能打开 {app['name']}，请检查它是否已正确安装。")
 
+    def _install_docker(self):
+        """Windows, once the user agreed to Docker's terms in the app: download, check and install
+        Docker Desktop for this user. Stops with SetupBlocked where only the user can go on."""
+        self.prepare_phase = 'checking_system'
+        # The page's request has usually just looked (docker-setup in app.py).
+        step = self.setup.step if self.setup.fresh() else self.setup.check()
+        if step in ('windows', 'virtualization'):
+            raise SetupBlocked(step)
+        self.setup.ensure_space()
+        # The download goes ahead while the user switches WSL on or restarts.
+        self.prepare_phase, self.prepare_progress = 'downloading_docker', 0
+        def progress():
+            if self.setup.total:
+                self.prepare_progress = min(99, self.setup.downloaded * 100 // self.setup.total)
+        try:
+            installer = self.setup.download(progress)
+        finally:
+            self.prepare_progress = None
+        self.prepare_phase = 'checking_system'
+        if self.setup.check():
+            raise SetupBlocked(self.setup.step)
+        self.prepare_phase = 'installing_docker'
+        log = self.store.data_dir / 'build.log'
+        with log.open('w', encoding='utf-8') as output:
+            os.chmod(log, 0o600)
+            self.setup.install(installer, output)
+        self._docker = None
+
+    def _switch_to_linux(self, status, wait=180):
+        """Docker Desktop installed for all users may run Windows containers; the browser image is Linux.
+        Docker Desktop's own CLI switches the engine (DockerCli.exe in versions before it)."""
+        commands = [[self.docker, 'desktop', 'engine', 'use', 'linux']]
+        app = engine_app()
+        if app:
+            commands.append([str(Path(app['path']).parent / 'DockerCli.exe'), '-SwitchLinuxEngine'])
+        for command in commands:
+            try:
+                switched = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL, timeout=180, env=command_env(self.docker), **quiet()).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                switched = False
+            if not switched:
+                continue
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline:
+                self.monitor.engine_info(force=True)
+                status = self.status()
+                if status['docker_ready'] and status.get('docker_os') != 'windows':
+                    return status
+                time.sleep(2)
+        return status
+
     def _prepare_job(self, attempts=300):
         try:
             status = self.status()
             if not status['docker_installed']:
-                raise ValueError('请先安装 Docker Desktop。装好并打开后，工作台会自动继续准备。')
+                if not (windows() and self.setup.accepted()):
+                    raise ValueError('请先安装 Docker Desktop。装好并打开后，工作台会自动继续准备。')
+                self._install_docker()
+                status = self.status()
+                if not status['docker_installed']:
+                    raise ValueError('Docker Desktop 已经装好，但工作台还没找到它。请关闭并重新打开 Browser Workbench。')
             if not status['docker_ready']:
                 self.prepare_phase = 'starting_docker'
                 self._open_desktop()
@@ -335,8 +403,10 @@ class Runtime(ResourceControls):
                 if not status['docker_ready']:
                     raise ValueError('Docker 仍未就绪。请在 Docker 窗口完成首次启动提示，然后回这里重试。')
             if status.get('docker_os') == 'windows':
-                # Docker Desktop on Windows can be switched to Windows containers; the browser image is Linux.
-                raise ValueError(WINDOWS_CONTAINERS)
+                self.prepare_phase = 'switching_engine'
+                status = self._switch_to_linux(status)
+                if status.get('docker_os') == 'windows':
+                    raise ValueError(WINDOWS_CONTAINERS)
             if status['image_ready']:
                 self.build_state, self.prepare_phase = 'ready', 'ready'
                 self.build_error = None

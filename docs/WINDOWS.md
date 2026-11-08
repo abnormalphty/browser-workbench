@@ -7,10 +7,32 @@ Windows 版和 Mac 应用共用同一份后端、网页界面和浏览器组件�
 - 安装包：`Browser-Workbench-VERSION-x64-Setup.exe`，适用于 64 位的 Windows 10（22H2）或 Windows 11。
 - 只为当前用户安装到 `%LOCALAPPDATA%\Programs\Browser Workbench`，不需要管理员权限；在开始菜单和桌面放快捷方式，可在“设置 → 应用”里卸载。
 - 第一次运行安装包时，Windows 可能提示“Windows 已保护你的电脑”：点“更多信息 → 仍要运行”。原因是安装包没有代码签名证书。打开了“智能应用控制”的电脑会直接拦下未签名的程序，这种情况只能购买代码签名证书解决。
-- 需要 Docker Desktop。没有安装时，应用会给出官方下载链接和步骤：安装时保持“Use WSL 2”勾选，按提示重启；打开 Docker Desktop 同意条款后，回到应用会自动继续，并载入安装包自带的浏览器组件。Docker Desktop 需要电脑开启虚拟化，并安装 WSL 2（安装程序会提示）。浏览器组件是 Linux 镜像：Docker Desktop 被切换到“Windows 容器”时，应用不会去载入组件，而是提示在任务栏 Docker 图标的右键菜单里选择“Switch to Linux containers…”。
+- 需要 Docker Desktop。没有安装时，应用可以自动安装（见下一节），也可以点“手动安装”从官网下载；装好后应用会自动继续，并载入安装包自带的浏览器组件。Docker Desktop 需要电脑开启 CPU 虚拟化和 WSL 2。
+- 浏览器组件是 Linux 镜像。Docker Desktop 处于“Windows 容器”模式时，应用会先用 `docker desktop engine use linux` 自动切回（旧版用 `DockerCli.exe -SwitchLinuxEngine`）；切不过去时，才提示在任务栏 Docker 图标的右键菜单里选“Switch to Linux containers…”。
 - 窗口用 Windows 自带的 Microsoft Edge WebView2 显示。Windows 11 和绝大多数 Windows 10 已经有它；没有时安装程序会联网安装。
 - 关闭窗口即退出应用。有环境在运行时会询问：停止环境并退出、保留运行并退出、或取消。再次打开快捷方式会回到已经打开的窗口。
 - 窗口左上角的系统菜单（点图标或按 Alt+空格）里有“打开数据文件夹”和“打开日志文件夹”。
+
+## 自动安装 Docker Desktop
+
+点“同意并自动安装”即表示用户同意 [Docker 订阅服务协议](https://www.docker.com/legal/docker-subscription-service-agreement/)。个人使用、教育和小公司免费；员工超过 250 人或年收入超过 1000 万美元的公司需要付费订阅。这次同意只对这一次安装有效：Docker Desktop 以后被卸载时，应用会重新询问，不会自己重装。
+
+同意后，后端（`workbench/docker_setup.py`）按下面的顺序准备，每一步的进度都显示在“运行组件”里：
+
+1. **检查电脑**：Windows 版本至少为 10 22H2；CPU 虚拟化已开启（有正在运行的虚拟机监控程序也算）；“虚拟机平台”（Virtual Machine Platform，WSL 2 依靠它运行）已开启；WSL 已安装且不低于 2.1.5。这些信息由一次 PowerShell 查询取得。
+2. **下载**：从 `https://desktop.docker.com/win/main/amd64/Docker Desktop Installer.exe` 下载，约 600 MB，放在 `Data\setup`。
+   - 使用 Windows 的代理设置。
+   - 断线后从断点续传；如果 Docker 中途发布了新版，就重新完整下载。
+   - 下载完要核对数字签名：必须是 Docker Inc 签名且签名有效，否则删除，不会运行。
+3. **开启 WSL 2（只在需要时）**：这是唯一需要管理员权限的一步，每台电脑只需一次。
+   - 窗口外壳（`MainForm.cs` 的 `setup.enableWsl`）请 Windows 授权（用户账户控制），然后在一个命令行窗口里运行 Windows 自带的 `dism.exe`（开启虚拟机平台）和 `wsl.exe --install --no-distribution`；从微软商店下载失败时，改用 `--web-download` 从 GitHub 下载。
+   - 之后通常要重启电脑。应用会在当前用户的 RunOnce 里登记一次，重启登录后自动打开，并按已保存的同意继续；也可以点“立即重启电脑”。
+4. **安装**：运行 `Docker Desktop Installer.exe install --user --quiet --accept-license --backend=wsl-2`，只为当前用户安装到 `%LOCALAPPDATA%\Programs\DockerDesktop`，不需要管理员权限。成功后删除安装包。
+5. **启动并载入**：自动启动 Docker Desktop（找不到它的程序时改用 `docker desktop start`），等待就绪，再载入自带的浏览器组件。Docker Desktop 第一次启动时可能显示欢迎或登录窗口，可以跳过。
+
+过程记录写在日志文件夹的 `backend.log` 里，以 `[docker-setup]` 开头。安装失败时，Docker 安装程序自身日志的末尾会附在 `Data\build.log`。同意时间和开启 WSL 的时间记在 `Data\setup\docker.json`。
+
+应用能找到两种安装方式的 Docker Desktop：只为当前用户安装（`%LOCALAPPDATA%\Programs\DockerDesktop`，Docker Desktop 4.83 起的默认方式），以及为所有用户安装（`C:\Program Files\Docker\Docker`）。自定义了安装位置时，从 Docker Desktop 的卸载信息里读取。
 
 ## 数据放在哪里
 
@@ -40,7 +62,7 @@ Browser Workbench\
 - 外壳启动 `python\python.exe -E -s -B -X utf8 -m workbench.desktop --data-dir … --exit-on-stdin-eof`，读到 `WORKBENCH_READY {"port":…}` 后打开 `http://127.0.0.1:端口/`；关闭标准输入即请后端退出，8 秒不退则结束进程。与 Mac 外壳是同一套约定。
 - 网页通过 `window.workbenchBridge.call(类型, 数据)` 请求原生功能（剪贴板读写、用默认浏览器打开链接、在资源管理器里显示下载的文件），只接受来自本机工作台主框架的请求。外壳注入 `window.workbenchNative = {version, platform: 'windows'}`，页面据此使用 Windows 的说法（资源管理器、Ctrl+V）和 Docker Desktop 的安装步骤，不需要 Mac 的标题栏占位。
 - “下载到电脑”由 WebView2 的下载事件接管，保存到“下载”文件夹，同名时自动编号，不弹出浏览器下载面板。
-- 后端在 Windows 上：用 `CREATE_NO_WINDOW` 启动 docker 命令（否则每次都会闪一个命令行窗口）；在 `C:\Program Files\Docker\Docker` 找 Docker Desktop；数据文件夹用 `msvcrt.locking` 加锁防止两个后端同时使用；文件传输没有 `dir_fd`，改为逐级用 `lstat` 检查，拒绝符号链接和目录连接点。
+- 后端在 Windows 上：用 `CREATE_NO_WINDOW` 启动 docker 命令（否则每次都会闪一个命令行窗口）；在只为当前用户和为所有用户安装的两个位置找 Docker Desktop（见上文）；数据文件夹用 `msvcrt.locking` 加锁防止两个后端同时使用；文件传输没有 `dir_fd`，改为逐级用 `lstat` 检查，拒绝符号链接和目录连接点。
 
 ## 构建（在 Mac 上）
 

@@ -22,11 +22,16 @@ Intel Mac 版本尚未构建和验证。
 下载 `Browser-Workbench-0.8.0-x64-Setup.exe`，双击安装（只为当前用户安装，不需要管理员权限），从开始菜单或桌面打开。适用于 64 位 Windows 10（22H2）和 Windows 11。
 
 - **首次运行被拦截**：安装包没有代码签名证书，Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”。打开了“智能应用控制”的电脑会直接拦下未签名程序。
-- **Docker**：需要 Docker Desktop（使用 WSL 2、Linux 容器）。没有安装时，应用给出官方下载链接和步骤；装好并打开后自动继续，并载入安装包自带的浏览器组件。Docker Desktop 被切换到“Windows 容器”时，应用会提示切回 Linux 容器。
+- **Docker**：需要 Docker Desktop（使用 WSL 2、Linux 容器）。没有安装时，点“同意并自动安装”，应用会完成全部准备：
+  - 从 Docker 官网下载安装包，核对 Docker 的数字签名；
+  - 只为当前用户安装 Docker Desktop，不需要管理员权限；
+  - 启动 Docker Desktop，并载入安装包自带的浏览器组件。
+
+  如果电脑还没开启 WSL 2，Windows 会请你授权一次，之后需要重启一次；重启后应用会自动打开并继续。也可以手动安装，装好后应用同样会自动继续。Docker Desktop 处于“Windows 容器”模式时，应用会自动切回 Linux 容器。
 - **数据**：数据库、订阅和文件传输文件夹在 `%LOCALAPPDATA%\BrowserWorkbench\Data`，日志在 `...\Logs`；各环境的 Firefox 登录数据放在 Docker 存储卷里（原因见说明）。卸载应用不会删除这些数据。
 - **关闭**：关窗口即退出；有环境在运行时会询问是否一起停止。
 
-结构、数据位置与构建方法见 [Windows 版说明](docs/WINDOWS.md)。Windows 版目前只在 Mac 上完成了构建和模拟验证，尚未在真实 Windows 电脑上验收。
+结构、数据位置与构建方法见 [Windows 版说明](docs/WINDOWS.md)。Windows 版已在 Mac 上完成构建和模拟验证，也在 GitHub 提供的 Windows 机器上跑过安装与自检，但还没有在装了 Docker Desktop 的真实 Windows 电脑上验收。
 
 ## 从源码运行（网页版）
 
@@ -132,6 +137,11 @@ Docker 已安装时，工作台把“启动 Docker → 等待就绪 → 准备�
 - Windows 上各环境的 Firefox 登录数据放在 Docker 存储卷，文件传输文件夹仍在 Windows 数据目录；后台调用 Docker 时不再闪出命令行窗口。
 - 浏览器组件升级到 0.8.0：从 Windows 共享进容器的文件夹不能改所有者时，容器照常启动。Mac 版第一次打开新版时会自动载入一次新组件。
 - 网页界面按系统显示说法（资源管理器 / Finder、Ctrl+V / ⌘V）和 Docker Desktop 的安装步骤。
+- Windows 上可以一键安装 Docker Desktop：
+  - 从 Docker 官网下载，断线后能续传，并核对 Docker 的数字签名；
+  - 只为当前用户安装，不需要管理员权限；
+  - 需要时请 Windows 授权一次开启 WSL 2，并在重启后自动继续。
+- Windows 上能找到只为当前用户安装的 Docker Desktop（Docker Desktop 4.83 起的默认安装方式）；Docker Desktop 处于“Windows 容器”模式时会自动切回 Linux 容器。
 - 浏览器组件的构建在网络不稳定时会重试下载并保留已下载的软件包。
 
 ## v0.7.3 自动检测线路位置

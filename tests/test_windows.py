@@ -20,13 +20,24 @@ def on_mac():
 
 class WindowsDockerTests(unittest.TestCase):
     def test_docker_desktop_is_found_where_its_installer_puts_it(self):
-        exe = docker_env.WINDOWS_CLI[0]
-        with on_windows(), patch('shutil.which', return_value=None), \
-             patch('os.path.isfile', side_effect=lambda path: path == exe), patch('os.access', return_value=True):
-            self.assertEqual(docker_env.find_cli(), exe)
-        name, path = docker_env.WINDOWS_ENGINE_APPS[0]
-        with on_windows(), patch.object(Path, 'is_file', lambda self: str(self) == path):
-            self.assertEqual(docker_env.engine_app(), {'name': 'Docker Desktop', 'path': path})
+        # Per user (the installer's default since 4.83) and for all users.
+        self.assertEqual([root.parts[-2:] for root in docker_env.WINDOWS_ROOTS], [('Programs', 'DockerDesktop'), ('Docker', 'Docker')])
+        for root in docker_env.WINDOWS_ROOTS:
+            exe = str(root/'resources'/'bin'/'docker.exe')
+            with on_windows(), patch('shutil.which', return_value=None), \
+                 patch('os.path.isfile', side_effect=lambda path, exe=exe: path == exe), patch('os.access', return_value=True):
+                self.assertEqual(docker_env.find_cli(), exe)
+            app = str(root/'Docker Desktop.exe')
+            with on_windows(), patch.object(Path, 'is_file', lambda self, app=app: str(self) == app):
+                self.assertEqual(docker_env.engine_app(), {'name': 'Docker Desktop', 'path': app})
+
+    def test_a_custom_install_folder_comes_from_the_uninstall_entry(self):
+        from test_docker_setup import FakeRegistry  # tests/ is on the path under unittest discover
+        registry = FakeRegistry({('HKCU', docker_env.UNINSTALL_KEY): {'InstallLocation': '"D:\\Apps\\Docker"'}})
+        with patch.dict('sys.modules', {'winreg': registry}):
+            roots = docker_env.windows_roots()
+        self.assertEqual(roots[0], Path('D:\\Apps\\Docker'))
+        self.assertEqual(roots[1:], list(docker_env.WINDOWS_ROOTS))
 
     def test_docker_commands_get_the_cli_folder_first_and_no_mac_paths(self):
         # No drive letter here: off Windows the path separator is ':' too.

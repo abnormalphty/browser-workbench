@@ -3,7 +3,9 @@
 Apps opened from Finder get PATH=/usr/bin:/bin:/usr/sbin:/sbin, so the docker
 CLI and its credential helpers are invisible unless we look for them. On
 Windows, Docker Desktop's PATH entry only reaches processes started after the
-installation, so its default location is checked as well.
+installation, so its install folders are checked as well: per user (the
+installer's default since Docker Desktop 4.83, no administrator rights), for all
+users, or wherever its uninstall entry says.
 """
 from functools import lru_cache
 import os
@@ -31,17 +33,39 @@ ENGINE_APPS = (
     ('OrbStack', str(HOME/'Applications/OrbStack.app')),
 )
 PROGRAM_FILES = Path(os.environ.get('ProgramFiles', r'C:\Program Files'))
-WINDOWS_CLI = (str(PROGRAM_FILES/'Docker'/'Docker'/'resources'/'bin'/'docker.exe'),)
-WINDOWS_ENGINE_APPS = (('Docker Desktop', str(PROGRAM_FILES/'Docker'/'Docker'/'Docker Desktop.exe')),)
+LOCAL_APP_DATA = Path(os.environ.get('LOCALAPPDATA', str(HOME/'AppData'/'Local')))
+# Docker Desktop installed for this user only, then for all users.
+WINDOWS_ROOTS = (LOCAL_APP_DATA/'Programs'/'DockerDesktop', PROGRAM_FILES/'Docker'/'Docker')
+UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop'
 EXTRA_PATH = ('/usr/local/bin', '/opt/homebrew/bin', str(HOME/'.docker/bin'),
               '/Applications/Docker.app/Contents/Resources/bin', str(HOME/'.orbstack/bin'))
+
+
+def windows_roots():
+    """Docker Desktop's folders on Windows: a custom one from its uninstall entry first, then the defaults."""
+    found = []
+    try:
+        import winreg
+    except ImportError:
+        winreg = None
+    if winreg:
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(hive, UNINSTALL_KEY) as key:
+                    location = winreg.QueryValueEx(key, 'InstallLocation')[0]
+            except OSError:
+                continue
+            if isinstance(location, str) and location.strip(' "'):
+                found.append(Path(location.strip(' "')))
+    return list(dict.fromkeys([*found, *WINDOWS_ROOTS]))
 
 
 def find_cli():
     found = shutil.which('docker')
     if found:
         return found
-    for candidate in WINDOWS_CLI if windows() else CLI_CANDIDATES:
+    candidates = [str(root/'resources'/'bin'/'docker.exe') for root in windows_roots()] if windows() else CLI_CANDIDATES
+    for candidate in candidates:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
@@ -49,7 +73,8 @@ def find_cli():
 
 def engine_app():
     if windows():
-        return next(({'name': name, 'path': path} for name, path in WINDOWS_ENGINE_APPS if Path(path).is_file()), None)
+        return next(({'name': 'Docker Desktop', 'path': str(root/'Docker Desktop.exe')}
+                     for root in windows_roots() if (root/'Docker Desktop.exe').is_file()), None)
     for name, path in ENGINE_APPS:
         if Path(path).is_dir():
             return {'name': name, 'path': path}

@@ -327,12 +327,18 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 .check-option { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--text-2); }
 .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .dialog-footer > a:first-child { margin-right: auto; }
+.footer-links { display: flex; align-items: center; gap: 14px; margin-right: auto; }
 .account-evidence { margin-bottom: 10px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
 .runtime-checklist { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .runtime-check { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
 .runtime-check:first-child { border-top: 0; }
 .runtime-check span { font-size: 12.5px; color: var(--text-2); text-align: right; }
 .runtime-install { margin: 12px 0 0; padding: 10px 12px 10px 30px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; line-height: 1.75; color: var(--text-2); }
+.runtime-auto { margin-top: 12px; padding: 11px 13px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; line-height: 1.7; color: var(--text-2); }
+.runtime-auto p { margin: 0; }
+.runtime-auto p + p { margin-top: 6px; }
+.runtime-auto a { color: var(--accent-text); }
+#runtimeError { white-space: pre-line; }
 .transfer-dialog { width: min(720px, calc(100vw - 32px)); }
 .file-drop { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px; border: 1.5px dashed var(--line-strong); border-radius: 12px; background: var(--surface-2); text-align: center; cursor: pointer; }
 .file-drop strong { font-size: 13.5px; font-weight: 600; }

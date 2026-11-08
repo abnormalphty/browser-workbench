@@ -20,9 +20,12 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
+      - name: Docker Desktop setup against real Windows (downloads Docker's installer, does not install it)
+        run: python tests/windows_setup_check.py
 
   app:
     runs-on: windows-latest
+    timeout-minutes: 40
     permissions:
       contents: write  # a draft release is listed only to tokens with push access; nothing is written
     env:
@@ -58,7 +61,7 @@ jobs:
           $env:BROWSER_WORKBENCH_UI_TEST_OUT = "$run/out"
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\Browser Workbench\BrowserWorkbench.exe'
           $process = Start-Process $exe -PassThru
-          $deadline = (Get-Date).AddMinutes(6)
+          $deadline = (Get-Date).AddMinutes(15)  # includes the WSL step
           while (-not (Test-Path "$run/out/result.json") -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
           $process.WaitForExit(60000) | Out-Null
           Get-Content "$run/logs/*" -ErrorAction SilentlyContinue | Select-Object -Last 40

@@ -421,6 +421,12 @@ namespace BrowserWorkbench
                     if (!(body.TryGetValue("path", out var path) && path is string file) || !revealable.Contains(file)) throw new BridgeError("forbidden");
                     Process.Start(new ProcessStartInfo("explorer.exe", "/select," + AppPaths.JoinArguments(new[] { file })) { UseShellExecute = true });
                     return Ok();
+                case "setup.enableWsl":
+                    return await EnableWslAsync();
+                case "setup.restart":
+                    // Confirmed in the page; programs may still ask to save their work.
+                    Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), "/r /t 0") { UseShellExecute = false, CreateNoWindow = true });
+                    return Ok();
                 default:
                     if (type != null && type.StartsWith("test.", StringComparison.Ordinal)) return await HandleUITest(type, body);
                     throw new BridgeError("unknown request");
@@ -428,6 +434,47 @@ namespace BrowserWorkbench
         }
 
         static Dictionary<string, object> Ok() => new Dictionary<string, object> { ["ok"] = true };
+
+        bool enablingWsl;
+
+        /// <summary>Switches on Virtual Machine Platform, which WSL 2 runs on, and installs WSL: the one part of
+        /// installing Docker Desktop that needs an administrator, once per computer (docker_setup.py does the
+        /// rest without). Asked from this window so Windows' consent prompt opens in front of it. Only Windows'
+        /// own tools run elevated, in a console that shows their progress; the backend checks the result.</summary>
+        async Task<object> EnableWslAsync()
+        {
+            if (enablingWsl) throw new BridgeError("busy");
+            var system = Environment.SystemDirectory;
+            string Tool(string name) => "\"" + Path.Combine(system, name) + "\"";
+            var wsl = Tool("wsl.exe") + " --install --no-distribution";
+            // cmd /c "…" drops the outer quotes; && and || bind before &, so a failed Store download retries from GitHub.
+            var steps = "title Browser Workbench - WSL 2 & " +
+                        Tool("dism.exe") + " /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart & " +
+                        wsl + " || " + wsl + " --web-download";
+            var info = new ProcessStartInfo(Path.Combine(system, "cmd.exe"), "/d /c \"" + steps + "\"")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                ErrorDialog = false,
+            };
+            enablingWsl = true;
+            try
+            {
+                Process process;
+                try { process = Process.Start(info); }
+                catch (System.ComponentModel.Win32Exception error) when (error.NativeErrorCode == 1223)  // the user declined
+                {
+                    return new Dictionary<string, object> { ["cancelled"] = true };
+                }
+                if (process == null) throw new BridgeError("not started");
+                using (process)
+                {
+                    await Task.Run(() => process.WaitForExit());
+                    return new Dictionary<string, object> { ["ok"] = true, ["code"] = process.ExitCode };
+                }
+            }
+            finally { enablingWsl = false; }
+        }
 
         /// <summary>Another program may hold the clipboard for a moment; retry briefly.</summary>
         static T WithClipboard<T>(Func<T> action)
