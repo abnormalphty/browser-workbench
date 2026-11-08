@@ -57,9 +57,17 @@ try {
   tb = await band({click: mid(rect('#breadcrumbCurrent'))});
   step('click in the title band starts a window drag', tb.drags === 1, JSON.stringify(tb));
   if (tb.doubleClick === 'zoom') {
-    const before = tb.zoomed, first = await band({click: [700, 26], count: 2}), second = await band({click: [700, 26], count: 2});
+    // The zoom animation can outlast the 0.8 s the app waits before it answers, on a busy Mac: ask again
+    // (a single synthetic click never moves the window) until the window has the expected state.
+    const settled = async expected => {
+      let state;
+      for (let i = 0; i < 8; i++) if ((state = (await band({click: [700, 26]})).zoomed) === expected) break;
+      return state;
+    };
+    const before = tb.zoomed, first = await band({click: [700, 26], count: 2}), zoomed = await settled(!before);
+    const second = await band({click: [700, 26], count: 2}), restored = await settled(before);
     step('double-click in the title band zooms the window, and again restores it',
-      first.zoomed !== before && second.zoomed === before && first.drags === 0, JSON.stringify({before, first, second}));
+      zoomed !== before && restored === before && first.drags === 0, JSON.stringify({before, first, zoomed, second, restored}));
   } else {
     steps.push({name: 'double-click in the title band', ok: null, detail: 'skipped: this Mac is set to ' + tb.doubleClick});
   }

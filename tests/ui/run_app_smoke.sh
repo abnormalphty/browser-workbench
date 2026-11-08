@@ -12,9 +12,21 @@ RUN=${UI_RUN_DIR:-$HOME/Library/Caches/BrowserWorkbenchBuild/ui-run/$(date +%Y%m
 DATA="$RUN/App Data/BrowserWorkbench"   # contains a space, like "Application Support"
 mkdir -p "$RUN/out" "$RUN/logs" "$RUN/downloads" "$DATA"
 
+# The app under test shares its preferences with an installed copy (same bundle id). Start from the
+# default window frame, so the zoom check never depends on how an earlier run left the window, and put
+# the saved frame back afterwards.
+PREFS=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
+FRAME_KEY="NSWindow Frame MainWindow"
+saved_frame=$(defaults read "$PREFS" "$FRAME_KEY" 2>/dev/null)
+defaults delete "$PREFS" "$FRAME_KEY" >/dev/null 2>&1
+restore_frame() {
+  if [[ -n $saved_frame ]]; then defaults write "$PREFS" "$FRAME_KEY" "$saved_frame"
+  else defaults delete "$PREFS" "$FRAME_KEY" >/dev/null 2>&1; fi
+}
+
 python3 -I tests/ui/fixture_server.py "$RUN/out" &
 FIXTURE=$!
-trap 'kill $FIXTURE 2>/dev/null' EXIT
+trap 'kill $FIXTURE 2>/dev/null; restore_frame' EXIT
 for _ in {1..50}; do [[ -f $RUN/out/port ]] && break; sleep 0.2; done
 sed "s#__FIXTURE__#http://host.docker.internal:$(<$RUN/out/port)#g" tests/ui/app_smoke.js > "$RUN/app_smoke.js"
 
