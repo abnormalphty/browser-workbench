@@ -83,30 +83,36 @@ scripts/build_windows.sh --with-image ~/Library/Caches/BrowserWorkbenchBuild/run
 - x64 浏览器组件：用后台自己的载入流程（`docker load`）载入安装包里那份文件后，在模拟的 x64 环境里、按 Windows 的方式（Firefox 登录数据放在 Docker 存储卷）运行容器测试，`tests/integration_runtime.py` 7 项、`tests/integration_transfers.py` 5 项全部通过，结束后没有留下存储卷。模拟运行比真机慢，重启后的页面检查放宽了等待时间（第一次按 10 秒等待时有一项超时）。
 - 两种架构的组件出自同一份 Dockerfile，Debian 软件包版本一致（x64 只多 3 个该架构专有的库）。
 
-2026-11-08 在 GitHub 提供的 Windows 机器（`windows-latest`）上验证过的。工作流是 `.github/workflows/windows.yml`，在代码推到 `windows-check` 分支、且安装包已放进同版本的草稿发布时运行：
+2026-11-08 在 GitHub 提供的 Windows 机器（`windows-latest`，Windows Server 2025）上验证过的。工作流是 `.github/workflows/windows.yml`，在代码推到 `windows-check` 分支、且安装包已放进同版本的草稿发布时运行。最近一次（提交 5c3009d）全部通过：
 
-- Windows 版 Python 3.12 上的基础测试 134 项通过。其中 12 项只检查 Mac 路径或导入旧版 Mac 数据，按设计跳过。
+- Windows 版 Python 3.12 上的基础测试 163 项通过。其中 12 项只检查 Mac 路径或导入旧版 Mac 数据，按设计跳过。
   - 第一次运行（2026-11-05）查出两个问题：Windows 没有系统时区库；读写文本文件默认不是 UTF-8。
   - 两个问题都已修复：依赖里加入了 `tzdata`，读写文本文件一律指定 UTF-8。
+- 自动安装 Docker Desktop 的准备步骤（`tests/windows_setup_check.py`，不安装 Docker Desktop）：
+  - 系统查询有结果：版本号 26100，虚拟化与虚拟机平台已开启，WSL 3.0.3；开机时间、两个 Docker Desktop 安装位置都能读到。
+  - 签名核对：微软签名的记事本读作“Microsoft Windows”，不会被当成 Docker；未签名的文件被拒绝；从 Docker 官网实际下载的安装包（623,748,528 字节，用时 7 秒）签名有效，属于 Docker Inc。
+  - 在 RunOnce 里登记“重启后打开”、再删除，都正常。
+  - 前一次运行查出一个问题：检查从 PowerShell 7 里启动时，Windows PowerShell 继承了 PowerShell 7 的模块路径，找不到签名核对命令，下载好的安装包每次都被当作签名不符删掉。已修复：后端启动 Windows PowerShell 时不再传入这个路径。从 PowerShell 7 窗口打开应用的电脑原本也会遇到这个问题。
 - 安装：从草稿发布下载安装包（SHA-256 与本地构建一致）并静默安装。程序文件和开始菜单快捷方式都已就位，自带的 Python 能读取时区。
-- 自检：启动窗口，在 WebView2 里运行 `tests/ui/windows_smoke.js`，6 项全部通过：
+- 自检：启动窗口，在 WebView2 里运行 `tests/ui/windows_smoke.js`，7 项全部通过：
   - 页面运行在 Windows 外壳里，原生桥可用；
   - 自带后端返回了正确的版本和平台；
   - 没有 Mac 标题栏占位，使用 Windows 的说法；
   - 剪贴板经原生桥往返，包括中文；
   - 拒绝在资源管理器里显示不是本应用保存的文件；
-  - Docker 不可用时给出说明（这台机器装了 Docker 命令，但后台服务没有运行）。
+  - Docker 不可用时给出说明（这台机器装了 Docker 命令，但后台服务没有运行）；
+  - 开启 WSL 2 的管理员步骤：以管理员身份运行 `dism.exe` 与 `wsl.exe --install`，15 秒后报告完成（GitHub 的机器不弹授权窗口）。
 
   数据目录用的是带空格的路径。
 - 退出与卸载：自检后应用自行退出，后端也随之结束；静默卸载后程序文件被删除。
 
-这些机器不能运行 Linux 容器，所以浏览器环境本身还没有在 Windows 上运行过。
+这些机器不能运行 Linux 容器，也装不了 Docker Desktop，所以 Docker Desktop 的安装和浏览器环境本身还没有在 Windows 上运行过。
 
 还需要在真实 Windows 电脑上验证的：
 
 - 用安装向导（非静默）安装、升级与卸载；SmartScreen 提示。
 - WebView2 窗口的其余原生功能：下载到电脑、在资源管理器中显示、系统菜单、深色标题栏、窗口位置记忆、再次打开回到已有窗口；以及退出时的询问。
-- Docker Desktop 的查找、启动与首次设置。
+- 自动安装 Docker Desktop 的完整过程：授权窗口、重启后自动打开并继续、Docker Desktop 的安装与首次启动；已装好的 Docker Desktop 的查找与启动。
 - 在真实的 Docker Desktop（WSL 2）里载入组件、启动环境并显示画面。
 - 文件传输文件夹在 Windows 共享下的读写。
 - 用户名含中文或空格时，Docker 能否共享文件传输文件夹。
