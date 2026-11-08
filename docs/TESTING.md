@@ -17,7 +17,9 @@ v0.6.1 准备流程回归：76项自动检查通过，包含模拟 Docker 未启
 
 - 在 Mac 上：基础测试含 Windows 分支；窗口外壳编译；安装包内容核对；x64 浏览器组件载入后在模拟环境里按 Windows 的存储方式跑容器集成 7 项与文件传输 5 项（结果与方法见 [Windows 版说明](WINDOWS.md#验证状况)）。
 - 模拟运行的容器测试：先用应用的载入流程把 `browser-runtime-x86_64.tar.gz` 载入为 `local-browser-workbench:<版本>`（会暂时替换本机同名的 Mac 镜像，测完删掉，再由 Mac 应用自己载入），设 `WORKBENCH_PROFILE_STORAGE=volume` 运行两个集成测试，并把页面检查的等待时间放宽到 2 分钟左右。
-- 在 Windows 上：`.github/workflows/windows.yml`（单元测试 + 安装、自检、卸载）与真机验收，尚未进行。
+- 在 Windows 上：
+  - GitHub 的 Windows 机器（`.github/workflows/windows.yml`）2026-11-08 全部通过，包括单元测试，以及静默安装、窗口自检、退出、卸载（见 [Windows 版说明](WINDOWS.md#验证状况)）。
+  - 真机验收（Docker Desktop 与真实环境）尚未进行。
 
 ## v0.7 Mac 应用
 

@@ -61,6 +61,30 @@ scripts/build_windows.sh --with-image ~/Library/Caches/BrowserWorkbenchBuild/run
 - x64 浏览器组件：用后台自己的载入流程（`docker load`）载入安装包里那份文件后，在模拟的 x64 环境里、按 Windows 的方式（Firefox 登录数据放在 Docker 存储卷）运行容器测试，`tests/integration_runtime.py` 7 项、`tests/integration_transfers.py` 5 项全部通过，结束后没有留下存储卷。模拟运行比真机慢，重启后的页面检查放宽了等待时间（第一次按 10 秒等待时有一项超时）。
 - 两种架构的组件出自同一份 Dockerfile，Debian 软件包版本一致（x64 只多 3 个该架构专有的库）。
 
-需要在真实 Windows 电脑上验证的：安装、升级与卸载；SmartScreen 提示；WebView2 窗口与原生功能（剪贴板、下载到电脑、在资源管理器中显示、系统菜单、深色标题栏、窗口位置记忆、再次打开回到已有窗口）；退出询问；Docker Desktop 的查找、启动与首次设置；在真实 Docker Desktop（WSL 2）里载入组件、启动环境与显示画面；文件传输文件夹在 Windows 共享下的读写；中文用户名与带空格的路径。
+2026-11-08 在 GitHub 提供的 Windows 机器（`windows-latest`）上验证过的。工作流是 `.github/workflows/windows.yml`，在代码推到 `windows-check` 分支、且安装包已放进同版本的草稿发布时运行：
 
-GitHub 提供的 Windows 机器可以自动跑一部分（`.github/workflows/windows.yml`：Windows 版 Python 上的单元测试；静默安装、启动窗口、运行 `tests/ui/windows_smoke.js` 自检、退出与卸载）。这些机器不能运行 Linux 容器，浏览器环境本身仍需真机。工作流需要把代码推到 `windows-check` 分支，并把安装包上传到同版本的草稿发布，尚未运行过。
+- Windows 版 Python 3.12 上的基础测试 134 项通过。其中 12 项只检查 Mac 路径或导入旧版 Mac 数据，按设计跳过。
+  - 第一次运行（2026-11-05）查出两个问题：Windows 没有系统时区库；读写文本文件默认不是 UTF-8。
+  - 两个问题都已修复：依赖里加入了 `tzdata`，读写文本文件一律指定 UTF-8。
+- 安装：从草稿发布下载安装包（SHA-256 与本地构建一致）并静默安装。程序文件和开始菜单快捷方式都已就位，自带的 Python 能读取时区。
+- 自检：启动窗口，在 WebView2 里运行 `tests/ui/windows_smoke.js`，6 项全部通过：
+  - 页面运行在 Windows 外壳里，原生桥可用；
+  - 自带后端返回了正确的版本和平台；
+  - 没有 Mac 标题栏占位，使用 Windows 的说法；
+  - 剪贴板经原生桥往返，包括中文；
+  - 拒绝在资源管理器里显示不是本应用保存的文件；
+  - Docker 不可用时给出说明（这台机器装了 Docker 命令，但后台服务没有运行）。
+
+  数据目录用的是带空格的路径。
+- 退出与卸载：自检后应用自行退出，后端也随之结束；静默卸载后程序文件被删除。
+
+这些机器不能运行 Linux 容器，所以浏览器环境本身还没有在 Windows 上运行过。
+
+还需要在真实 Windows 电脑上验证的：
+
+- 用安装向导（非静默）安装、升级与卸载；SmartScreen 提示。
+- WebView2 窗口的其余原生功能：下载到电脑、在资源管理器中显示、系统菜单、深色标题栏、窗口位置记忆、再次打开回到已有窗口；以及退出时的询问。
+- Docker Desktop 的查找、启动与首次设置。
+- 在真实的 Docker Desktop（WSL 2）里载入组件、启动环境并显示画面。
+- 文件传输文件夹在 Windows 共享下的读写。
+- 用户名含中文或空格时，Docker 能否共享文件传输文件夹。
