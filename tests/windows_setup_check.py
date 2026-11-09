@@ -22,8 +22,10 @@ def check(name, ok, detail=''):
 
 
 info = docker_setup.check_system()
-check('system check answers', isinstance(info['build'], int) and info['virtualization'] in (True, False) and info['vmp'] in (True, False, None),
-      json.dumps(info))
+check('system check answers', isinstance(info['build'], int) and info['virtualization'] in (True, False) and info['vmp'] in (True, False, None)
+      and info['hypervisor'] in (True, False) and info['reboot_pending'] in (True, False, None), json.dumps(info))
+# A restart Windows still waits for (after switching on a Windows feature) is read from the registry.
+check('a pending restart can be read', docker_setup.reboot_pending() in (True, False), str(docker_setup.reboot_pending()))
 booted = docker_setup.booted_at()
 check('boot time is in the past', booted is not None and time.time() - 90 * 86400 < booted < time.time(), str(booted))
 check('Docker Desktop folders', [root.parts[-1] for root in docker_env.windows_roots()][-2:] == ['DockerDesktop', 'Docker'],

@@ -85,7 +85,12 @@ namespace BrowserWorkbench
                 ["WORKBENCH_APP_VERSION"] = AppPaths.Version,
                 // Docker Desktop setup reopens the app once after the restart WSL needs (docker_setup.py).
                 ["WORKBENCH_APP_EXE"] = System.Windows.Forms.Application.ExecutablePath,
+                // Shown in the storage dialog (storage.py).
+                ["WORKBENCH_INSTALL_DIR"] = AppPaths.Install.TrimEnd('\\'),
             };
+            // The place the user chose for the data; absent when tests point the app at disposable data,
+            // which is never moved.
+            if (!AppPaths.DataOverridden) extra["WORKBENCH_DATA_ROOT"] = AppPaths.DataRoot;
             if (AppPaths.ImageArchive != null) extra["WORKBENCH_IMAGE_ARCHIVE"] = AppPaths.ImageArchive;
             var started = new Process
             {

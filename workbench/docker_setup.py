@@ -15,7 +15,6 @@ import http.client
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -26,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from .docker_env import LOCAL_APP_DATA
+from .storage import docker_data_root, free_space
 from .system import quiet, windows
 
 INSTALLER_URL = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
@@ -34,8 +35,12 @@ TERMS_URL = 'https://www.docker.com/legal/docker-subscription-service-agreement/
 PUBLISHER = 'dockerinc'  # the signer's name in letters only: "Docker Inc" (or "Docker, Inc.")
 MIN_BUILD = 19045        # Windows 10 22H2; Windows 11 starts at 22000
 MIN_WSL = (2, 1, 5)      # Docker Desktop's requirement
-FREE_SPACE_GB = 6        # installer, Docker Desktop, its Linux disk and the browser image
+# Free space needed, in GB: the installer (in the data folder), Docker Desktop itself (per user, in
+# %LOCALAPPDATA%) and its Linux disk with the browser image (next to the data folder if it was moved).
+SPACE_GB = {'installer': 0.5, 'program': 3, 'disk': 2.5}
 RUN_ONCE = r'Software\Microsoft\Windows\CurrentVersion\RunOnce'
+# Windows' own flag for servicing changes (such as a feature just switched on) that wait for a restart.
+REBOOT_PENDING = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
 RUN_ONCE_NAME = 'BrowserWorkbenchSetup'
 PF_VIRT_FIRMWARE_ENABLED = 21
 
@@ -44,7 +49,10 @@ MESSAGES = {
     'virtualization': '这台电脑没有开启 CPU 虚拟化，Docker 无法运行。请重启电脑进入 BIOS/UEFI 设置，开启 Intel VT-x 或 AMD-V（SVM），'
                       '保存后再打开本应用（虚拟机里则要开启嵌套虚拟化）。',
     'wsl': '还差一步：开启 Windows 的 WSL 2。需要管理员授权一次，之后通常要重启电脑。',
-    'restart': 'WSL 2 已开启，重启电脑后生效。重启后 Browser Workbench 会自动打开，继续安装 Docker Desktop。',
+    'restart': 'WSL 2 已开启，重启电脑后生效。重启后 Browser Workbench 会自动打开并继续。',
+    'hypervisor': 'Windows 的“虚拟机平台”已经开启，但还没有运行，Docker 无法启动。请先重启一次电脑。'
+                  '如果重启后仍然这样，可能是其他软件（例如部分安卓模拟器）关掉了 Windows 的虚拟化：'
+                  '以管理员身份打开命令提示符，运行 bcdedit /set hypervisorlaunchtype auto，再重启电脑。',
 }
 
 # One PowerShell call answers everything: virtualization (a running hypervisor hides the firmware flag),
@@ -102,19 +110,39 @@ def processor_feature(feature):
         return False
 
 
+def reboot_pending():
+    """True while Windows waits for a restart to finish a change, None if it cannot be read."""
+    if not windows():
+        return None
+    try:
+        import winreg
+    except ImportError:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REBOOT_PENDING):
+            return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+
+
 def check_system():
     """What Docker Desktop needs from this PC; None where Windows could not tell."""
-    info = {'build': None, 'virtualization': None, 'vmp': None, 'wsl': None}
+    info = {'build': None, 'virtualization': None, 'vmp': None, 'hypervisor': None, 'reboot_pending': None, 'wsl': None}
     if not windows():
         return info
     info['build'] = sys.getwindowsversion().build
+    info['reboot_pending'] = reboot_pending()
     try:
         found = powershell(SYSTEM_SCRIPT, timeout=90)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         log(f'system check failed: {str(exc)[:200]}')
         return info
     firmware = bool(found.get('firmware')) or processor_feature(PF_VIRT_FIRMWARE_ENABLED)
-    info['virtualization'] = bool(found.get('hypervisor')) or firmware
+    # A running hypervisor: what Virtual Machine Platform starts at boot (Hyper-V and memory integrity do too).
+    info['hypervisor'] = bool(found.get('hypervisor'))
+    info['virtualization'] = info['hypervisor'] or firmware
     state = found.get('vmp')
     info['vmp'] = True if state == 1 else False if state in (2, 3) else None
     info['wsl'] = found.get('wsl') or None
@@ -126,17 +154,26 @@ def wsl_ready(version):
     return len(numbers) >= 3 and tuple(int(n) for n in numbers[:3]) >= MIN_WSL
 
 
-def blocker(system, wsl_requested_at=None, booted_at=None):
-    """The first thing the user must do before Docker Desktop can be installed, or None."""
+def blocker(system, wsl_requested_at=None, booted_at=None, installed=False):
+    """The first thing the user must do before Docker Desktop can install and run, or None. For a Docker
+    Desktop already installed, only what keeps it from starting at all: it updates WSL itself."""
     if system.get('build') and system['build'] < MIN_BUILD:
         return 'windows'
     if system.get('virtualization') is False:
         return 'virtualization'
     since_boot = bool(wsl_requested_at) and booted_at is not None and wsl_requested_at > booted_at
-    if system.get('vmp') is False:
+    vmp, hypervisor, pending = system.get('vmp'), system.get('hypervisor'), system.get('reboot_pending')
+    if vmp is False:
         # Switching it on takes effect after a restart; a request from before the last start did not work.
         return 'restart' if since_boot else 'wsl'
-    if system.get('vmp') is True and not wsl_ready(system.get('wsl')) and not wsl_requested_at:
+    if since_boot and (vmp is None or pending or hypervisor is False):
+        # Switched on in this Windows session: Windows may already list it as on, but it only runs after
+        # the restart. Going on would leave Docker Desktop at "Virtual Machine Platform is not enabled".
+        return 'restart'
+    if vmp is True and hypervisor is False:
+        # On but not running: the restart is still due, or something keeps Windows' hypervisor off.
+        return 'restart' if pending else 'hypervisor'
+    if vmp is True and not installed and not wsl_ready(system.get('wsl')) and not wsl_requested_at:
         # Tried once; if WSL still is not current, Docker Desktop offers to update it when it starts.
         # Where Windows could not tell at all, the installer itself refuses a missing platform (install()).
         return 'wsl'
@@ -216,6 +253,16 @@ def forget_restart():
         pass
 
 
+def install_command(installer):
+    """Per user, no administrator rights, the WSL 2 engine. Its Linux disk, which grows with the browser image and
+    each environment's login data, goes next to the data folder when the user put that on another place."""
+    command = [str(installer), 'install', '--user', '--quiet', '--accept-license', '--backend=wsl-2']
+    disk = docker_data_root()
+    if disk:
+        command.append(f'--wsl-default-data-root={disk}')
+    return command
+
+
 class DockerSetup:
     """The one-click setup's state: the user's agreement and the WSL request are remembered in the
     data folder, so the setup carries on after the restart WSL needs."""
@@ -227,6 +274,7 @@ class DockerSetup:
         self.step = None
         self.system = None
         self.checked_at = None
+        self.checked_installed = False  # whether that check was for a Docker Desktop already installed
         self.downloaded = 0
         self.total = None
 
@@ -257,7 +305,7 @@ class DockerSetup:
         self._write(wsl_requested_at=time.time())
 
     def wsl_state(self):
-        if self.step in ('wsl', 'restart'):
+        if self.step in ('wsl', 'restart', 'hypervisor'):
             return self.step
         if self.system is None or self.system.get('vmp') is None:
             return None
@@ -271,23 +319,31 @@ class DockerSetup:
     def fresh(self, seconds=60):
         return self.checked_at is not None and time.monotonic() - self.checked_at < seconds
 
-    def check(self):
+    def check(self, installed=False):
         """Looks at the PC again; sets and returns the step the user must take, or None."""
         system = check_system()
-        self.system, self.checked_at = system, time.monotonic()
-        self.step = blocker(system, self._read().get('wsl_requested_at'), booted_at())
-        log(f"build {system['build']}, virtualization {system['virtualization']}, platform {system['vmp']}, "
-            f"wsl {system['wsl']}: {self.step or 'ready to install'}")
-        if self.step == 'restart':
+        self.system, self.checked_at, self.checked_installed = system, time.monotonic(), installed
+        self.step = blocker(system, self._read().get('wsl_requested_at'), booted_at(), installed)
+        log(f"build {system.get('build')}, virtualization {system.get('virtualization')}, platform {system.get('vmp')}, "
+            f"hypervisor {system.get('hypervisor')}, restart pending {system.get('reboot_pending')}, wsl {system.get('wsl')}: "
+            f"{self.step or 'nothing to do first'}")
+        if self.step in ('restart', 'hypervisor'):
             resume_after_restart()
         return self.step
 
     def ensure_space(self):
-        self.folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        free = shutil.disk_usage(self.folder).free
-        if free < FREE_SPACE_GB * 1024 ** 3:
-            raise ValueError(f'磁盘空间不够：安装 Docker Desktop 和浏览器组件约需 {FREE_SPACE_GB} GB，'
-                             f'现在只剩 {free / 1024 ** 3:.1f} GB。请清理后点“重试”。')
+        places = {'installer': self.folder, 'program': LOCAL_APP_DATA, 'disk': docker_data_root() or LOCAL_APP_DATA}
+        drives = {}
+        for part, place in places.items():
+            drive = Path(place).drive.upper()
+            needed, where = drives.get(drive, (0, place))
+            drives[drive] = (needed + SPACE_GB[part], where)
+        for drive, (needed, place) in drives.items():
+            free = free_space(place)
+            if free is not None and free < needed * 1024 ** 3:
+                name = f'{drive} 盘' if drive.endswith(':') else '磁盘'
+                raise ValueError(f'{name}空间不够：安装 Docker Desktop 和浏览器组件在这里约需 {needed:g} GB，'
+                                 f'现在只剩 {free / 1024 ** 3:.1f} GB。请清理后点“重试”。')
 
     def download(self, progress=lambda: None):
         """Docker's installer, resumed after interruptions; returns its path once its signature checks out."""
@@ -349,8 +405,8 @@ class DockerSetup:
             raise ValueError('Docker Desktop 安装包没有通过签名校验，已删除。请点“重试”重新下载。')
         log('installing for this user')
         try:
-            result = subprocess.run([str(installer), 'install', '--user', '--quiet', '--accept-license', '--backend=wsl-2'],
-                                    stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT, timeout=1800, **quiet())
+            result = subprocess.run(install_command(installer), stdin=subprocess.DEVNULL, stdout=output,
+                                    stderr=subprocess.STDOUT, timeout=1800, **quiet())
         except subprocess.TimeoutExpired as exc:
             raise ValueError('Docker Desktop 安装超时，请点“重试”。') from exc
         except OSError as exc:

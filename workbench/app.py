@@ -15,6 +15,7 @@ import httpx
 
 from . import __version__
 from .runtime import ROOT, Runtime
+from . import storage
 from .store import Store
 from .transfers import Transfers, MAX_UPLOAD
 from .subscriptions import fetch_subscription, parse_subscription
@@ -231,14 +232,15 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
 
     @app.post('/api/runtime/docker-setup')
     async def docker_setup(request: Request):
-        """Windows: install Docker Desktop from the app. accept_terms records that the user agreed to
-        Docker's terms; wsl_requested that the window just ran the WSL step (MainForm.cs)."""
+        """Windows: install Docker Desktop from the app, or get an installed one going. accept_terms records
+        that the user agreed to Docker's terms (needed only to install); wsl_requested that the window just
+        ran the WSL step (MainForm.cs)."""
         data = await body(request)
         if sys.platform != 'win32':
             raise ValueError('自动安装 Docker Desktop 目前只在 Windows 版提供。')
         if data.get('accept_terms') is True:
             runtime.setup.accept()
-        if not runtime.setup.accepted():
+        if not runtime.setup.accepted() and not runtime.docker:
             raise ValueError('请先阅读并同意 Docker 订阅服务协议。')
         if data.get('wsl_requested') is True:
             runtime.setup.wsl_requested()
@@ -246,6 +248,43 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
         await asyncio.to_thread(runtime.setup.check)
         runtime.build()
         return {'ok':True,'docker_setup':runtime.setup.status()}
+
+    @app.get('/api/storage')
+    async def storage_overview():
+        """Where the program, the data and each environment's login data are, and how big they are."""
+        return await asyncio.to_thread(storage.overview, store, runtime)
+
+    @app.post('/api/storage/check')
+    async def storage_check(request: Request):
+        """Whether the data folder can move to the folder the user picked; the window then moves it."""
+        data = await body(request)
+        return await asyncio.to_thread(storage.move_target, store, text(data, 'path'))
+
+    @app.post('/api/storage/open')
+    async def storage_open(request: Request):
+        from .system import open_folder
+        data = await body(request)
+        which = text(data, 'which')
+        overview = {'data': store.data_dir, 'install': os.environ.get('WORKBENCH_INSTALL_DIR'),
+                    'docker': (storage.docker_disk() or {}).get('folder')}
+        if which == 'old':
+            folder = text(data, 'folder')
+            if not any(storage.same_path(folder, copy) for copy in storage.old_copies(store.data_dir)):
+                raise ValueError('找不到这份旧数据，可能已经删除。')
+        elif overview.get(which):
+            folder = overview[which]
+        else:
+            raise ValueError('没有这个位置。')
+        if not Path(folder).is_dir():
+            raise ValueError('这个文件夹还不存在。')
+        open_folder(folder)
+        return {'ok':True}
+
+    @app.post('/api/storage/delete-old')
+    async def storage_delete_old(request: Request):
+        data = await body(request)
+        await asyncio.to_thread(storage.delete_old_copy, store, text(data, 'folder'))
+        return {'ok':True}
 
     @app.get('/api/environments/{env_id}/view')
     def view(env_id: str):

@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import yaml
 
-from .docker_env import command_env, download_url, engine_app, find_cli
+from .docker_env import command_env, download_url, engine_app, find_cli, uses_wsl
 from .docker_setup import DockerSetup, SetupBlocked
 from .system import quiet, windows
 
@@ -55,7 +55,7 @@ class Runtime(ResourceControls):
         self.prepare_phase = 'idle'
         self.prepare_progress = None
         self.setup = DockerSetup(store.data_dir)
-        self.scope = __import__('hashlib').sha256(str(store.data_dir).encode()).hexdigest()[:12]
+        self.scope = store.runtime_scope()
         from .geography import Geography
         self.geography = Geography(store,self)
         self.account_checking=set()
@@ -387,6 +387,14 @@ class Runtime(ResourceControls):
                 if not status['docker_installed']:
                     raise ValueError('Docker Desktop 已经装好，但工作台还没找到它。请关闭并重新打开 Browser Workbench。')
             if not status['docker_ready']:
+                if windows() and uses_wsl():
+                    # Without WSL 2's platform running Docker Desktop cannot start; it would only show its own
+                    # "Virtual Machine Platform is not enabled". Say what to do now instead of after a long wait.
+                    self.prepare_phase = 'checking_system'
+                    fresh = self.setup.fresh() and self.setup.checked_installed
+                    step = self.setup.step if fresh else self.setup.check(installed=True)
+                    if step:
+                        raise SetupBlocked(step)
                 self.prepare_phase = 'starting_docker'
                 self._open_desktop()
                 self.prepare_phase = 'waiting_docker'

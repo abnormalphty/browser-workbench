@@ -5,7 +5,11 @@ Windows 版和 Mac 应用共用同一份后端、网页界面和浏览器组件�
 ## 安装与使用
 
 - 安装包：`Browser-Workbench-VERSION-x64-Setup.exe`，适用于 64 位的 Windows 10（22H2）或 Windows 11。
-- 只为当前用户安装到 `%LOCALAPPDATA%\Programs\Browser Workbench`，不需要管理员权限；在开始菜单和桌面放快捷方式，可在“设置 → 应用”里卸载。
+- 只为当前用户安装，不需要管理员权限；在开始菜单和桌面放快捷方式，可在“设置 → 应用”里卸载。
+- 安装向导会问两个位置（见下文“数据放在哪里”）：
+  - **安装位置**：程序和自带的浏览器组件，默认 `%LOCALAPPDATA%\Programs\Browser Workbench`，可以改到其他磁盘。选的文件夹里已有其他文件时，程序装进其中新建的 `Browser Workbench` 文件夹，因为升级和卸载会删除程序文件夹里的程序文件。写不进去的位置（比如需要管理员权限的 `C:\Program Files`）会提示换一个。以后重新运行安装包、选别的位置，旧位置的程序会被删掉，数据不受影响。
+  - **数据存放位置**：只在第一次安装（还没有工作台数据）时出现，默认 `%LOCALAPPDATA%\BrowserWorkbench`。已有数据时不再询问，数据留在原处，需要时在应用里移动。
+- 静默安装：`Setup.exe /S /DATA=数据位置 /D=程序位置`。`/D=` 必须放在最后、不加引号；`/DATA=` 同样只在还没有数据时生效。
 - 第一次运行安装包时，Windows 可能提示“Windows 已保护你的电脑”：点“更多信息 → 仍要运行”。原因是安装包没有代码签名证书。打开了“智能应用控制”的电脑会直接拦下未签名的程序，这种情况只能购买代码签名证书解决。
 - 需要 Docker Desktop。没有安装时，应用可以自动安装（见下一节），也可以点“手动安装”从官网下载；装好后应用会自动继续，并载入安装包自带的浏览器组件。Docker Desktop 需要电脑开启 CPU 虚拟化和 WSL 2。
 - 浏览器组件是 Linux 镜像。Docker Desktop 处于“Windows 容器”模式时，应用会先用 `docker desktop engine use linux` 自动切回（旧版用 `DockerCli.exe -SwitchLinuxEngine`）；切不过去时，才提示在任务栏 Docker 图标的右键菜单里选“Switch to Linux containers…”。
@@ -26,22 +30,39 @@ Windows 版和 Mac 应用共用同一份后端、网页界面和浏览器组件�
    - 下载完要核对数字签名：必须是 Docker Inc 签名且签名有效，否则删除，不会运行。
 3. **开启 WSL 2（只在需要时）**：这是唯一需要管理员权限的一步，每台电脑只需一次。
    - 窗口外壳（`MainForm.cs` 的 `setup.enableWsl`）请 Windows 授权（用户账户控制），然后在一个命令行窗口里运行 Windows 自带的 `dism.exe`（开启虚拟机平台）和 `wsl.exe --install --no-distribution`；从微软商店下载失败时，改用 `--web-download` 从 GitHub 下载。
-   - 之后通常要重启电脑。应用会在当前用户的 RunOnce 里登记一次，重启登录后自动打开，并按已保存的同意继续；也可以点“立即重启电脑”。
+   - 之后要重启电脑。应用会在当前用户的 RunOnce 里登记一次，重启登录后自动打开，并按已保存的同意继续；也可以点“立即重启电脑”。
+   - 是否已经重启过，不只看 Windows 报告“虚拟机平台已开启”（还没重启时它也可能这么报告），还看三件事：开启 WSL 之后有没有重新开机；Windows 是否还在等待重启（注册表 `Component Based Servicing\RebootPending`）；虚拟机监控程序是否已经在运行。
+   - 虚拟机平台已开启、也重启过，但虚拟机监控程序仍没有运行（步骤 `hypervisor`）：多半是其他软件（例如部分安卓模拟器）关掉了 Windows 的虚拟化。应用会说明以管理员身份运行 `bcdedit /set hypervisorlaunchtype auto` 再重启。
 4. **安装**：运行 `Docker Desktop Installer.exe install --user --quiet --accept-license --backend=wsl-2`，只为当前用户安装到 `%LOCALAPPDATA%\Programs\DockerDesktop`，不需要管理员权限。成功后删除安装包。
+   - 数据存放位置不是默认位置时，再加 `--wsl-default-data-root=<数据位置>\Docker`：Docker 的 Linux 磁盘（浏览器组件和各环境的登录状态都在里面，会增长到几 GB）就放在数据旁边，而不是 C 盘。
+   - 安装前按磁盘检查剩余空间：安装包约 0.5 GB、程序约 3 GB、Linux 磁盘起步约 2.5 GB，在同一个磁盘上的合计。
 5. **启动并载入**：自动启动 Docker Desktop（找不到它的程序时改用 `docker desktop start`），等待就绪，再载入自带的浏览器组件。Docker Desktop 第一次启动时可能显示欢迎或登录窗口，可以跳过。
 
 过程记录写在日志文件夹的 `backend.log` 里，以 `[docker-setup]` 开头。安装失败时，Docker 安装程序自身日志的末尾会附在 `Data\build.log`。同意时间和开启 WSL 的时间记在 `Data\setup\docker.json`。
 
 应用能找到两种安装方式的 Docker Desktop：只为当前用户安装（`%LOCALAPPDATA%\Programs\DockerDesktop`，Docker Desktop 4.83 起的默认方式），以及为所有用户安装（`C:\Program Files\Docker\Docker`）。自定义了安装位置时，从 Docker Desktop 的卸载信息里读取。
 
+已经装好的 Docker Desktop 启动不了时（比如重启后“虚拟机平台”仍未运行，Docker 会提示 “Virtual Machine Platform is not enabled”），应用也做同样的电脑检查，在“运行组件”里给出同样的步骤：开启 WSL 2、重启电脑、或修复虚拟化。这些步骤不需要再同意 Docker 的协议。
+
 ## 数据放在哪里
+
+应用里“账号与资源 → 存储位置”列出下面这些位置和各自占用的空间（每个环境的登录状态与传输文件分开统计），每一处都有“打开”按钮。
 
 | 内容 | 位置 |
 | --- | --- |
-| 数据库、订阅、账号记录、文件传输文件夹 | `%LOCALAPPDATA%\BrowserWorkbench\Data` |
+| 数据库、订阅、账号记录、文件传输文件夹 | `<数据位置>\Data`，默认 `%LOCALAPPDATA%\BrowserWorkbench\Data` |
+| 各环境的 Firefox 配置与登录状态、浏览器组件 | Docker 的 Linux 磁盘，存储卷 `workbench-<范围>-<环境编号>` |
 | 日志 | `%LOCALAPPDATA%\BrowserWorkbench\Logs\backend.log` |
 | 窗口自身的浏览数据（只有工作台页面） | `%LOCALAPPDATA%\BrowserWorkbench\WebView2` |
-| 各环境的 Firefox 配置与登录状态 | Docker 存储卷 `workbench-<范围>-<环境编号>` |
+
+数据位置记在注册表 `HKCU\Software\BrowserWorkbench` 的 `DataLocation`（安装向导或移动数据时写入）；没有这一项时用默认位置。卸载不删除它，重新安装会找回原来的数据。日志和窗口自身的浏览数据很小，始终在默认位置。
+
+**移动数据**：在“存储位置”里点“更改位置…”，选一个文件夹。
+- 选的文件夹里已有其他文件时，数据放进其中新建的 `BrowserWorkbench` 文件夹。网络位置、程序文件夹里面、已经有一份工作台数据的地方、写不进去或空间不够的地方都会被拒绝，并说明原因。
+- 确认后，窗口先停止运行中的环境和后台，再由 `workbench/relocate.py` 复制到新位置的 `Data.partial`，逐个文件核对大小和 SHA-256，全部一致才改名为 `Data`、记下新位置。原来的文件夹改名为“旧数据（已移到新位置，可以删除）”，确认新位置正常后，可以在“存储位置”里删除（会再次确认，删除后无法恢复）。任何一步出错，新位置的半成品会被删掉，原来的数据不动，工作台继续用原来的位置。
+- Docker 存储卷的名字在第一次运行时记进数据库（`runtime_scope`，与旧版本按数据路径算出的值相同），所以移动后各环境仍然对应原来的登录状态。
+
+**Docker 的 Linux 磁盘**由 Docker Desktop 管理（默认 `%LOCALAPPDATA%\Docker\wsl`，设置记在 `%APPDATA%\Docker\settings-store.json` 的 `CustomWslDistroDir`）。由应用安装 Docker Desktop、而数据位置不是默认时，它在 `<数据位置>\Docker`。要移动已有的磁盘：先停止所有环境，打开 Docker Desktop → Settings → Resources → Advanced，在 Disk image location 选新文件夹，再点 Apply & restart，登录状态会一起移过去。
 
 Firefox 的登录数据放在 Docker 存储卷里，而不是 Windows 文件夹，原因有两个：从 Windows 共享进 Linux 容器的文件夹不能改所有者（容器启动时要改），而且 Firefox 依赖的 SQLite 文件锁在这种共享上不可靠、速度也慢。只有“电脑传入文件”“环境下载文件”两个文件夹仍在 Windows 数据目录里，方便在资源管理器里打开。
 

@@ -1,6 +1,10 @@
 // Runs inside the Windows app's WebView2 via BROWSER_WORKBENCH_UI_TEST (see .github/workflows/windows.yml).
 // GitHub's Windows machines cannot run Linux containers, so this covers the window, the bridge, the
 // bundled Python backend and the no-Docker guidance; environments themselves need a real PC.
+// The workflow fills in the folders it installed to; with them the test ends by moving the data folder.
+const expected = /*EXPECTED*/null;
+const same = (a, b) => String(a).replace(/\\+$/, '').toLowerCase() === String(b).replace(/\\+$/, '').toLowerCase();
+let moveTo = null;
 const steps = [];
 const step = (name, ok, detail = '') => { steps.push({name, ok: !!ok, detail: String(detail).slice(0, 400)}); return !!ok; };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -42,6 +46,24 @@ try {
   await native.call('test.snapshot', {name: '02-docker-guidance'});
   hideDialog('runtimeDialog');
 
+  // Where things are kept: the places the installer was given, shown in the storage dialog.
+  const places = await api('storage');
+  step('storage overview names the program, the data and Docker\'s place', places.data_dir && places.install_dir && places.docker?.folder &&
+    (!expected || (same(places.data_dir, expected.data + '\\Data') && same(places.install_dir, expected.install) && places.can_move)),
+    JSON.stringify({...places, environments: places.environments.length}));
+  setPage('information'); await sleep(300);
+  step('storage button shown in the Windows app', !$('storageSettings').hidden);
+  $('storageSettings').click();
+  step('storage dialog lists the places', await until(() => $('storageContent').querySelectorAll('.storage-path').length >= 2, 120000),
+    $('storageContent').textContent.slice(0, 300));
+  await native.call('test.snapshot', {name: '03-storage'});
+  hideDialog('storageDialog'); setPage('environments');
+  if (expected?.moveTo) {
+    const target = await api('storage/check', {method: 'POST', body: {path: expected.moveTo}});
+    step('the new place is checked before moving', same(target.data_dir, expected.moveTo + '\\Data'), JSON.stringify(target));
+    moveTo = target.root;
+  }
+
   // The one administrator step of the Docker Desktop setup (Virtual Machine Platform and WSL). GitHub's
   // machines grant it without a prompt; Docker Desktop itself is never installed here.
   const began = Date.now();
@@ -51,5 +73,7 @@ try {
 } catch (error) {
   step('test aborted', false, error?.message || error);
 }
-setTimeout(() => native.call('test.quit', {stopEnvironments: false}), 1000);
+// Moving stops the backend and reopens the workbench from the new place; the window then reports and quits.
+if (moveTo) setTimeout(() => native.call('storage.move', {target: moveTo}), 1500);
+else setTimeout(() => native.call('test.quit', {stopEnvironments: false}), 1000);
 return {steps, passed: steps.filter(s => s.ok).length, failed: steps.filter(s => !s.ok).map(s => s.name)};

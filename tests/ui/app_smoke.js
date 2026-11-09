@@ -21,7 +21,7 @@ try {
   step('page runs in app mode with native bridge', native && document.documentElement.classList.contains('native-app'));
   // The page polls on its own; refresh() returns early while that call is in flight.
   await until(async () => { await refresh(); return state.app; }, 30000, 500);
-  step('backend reports app version', state.app?.version === '0.8.0' && state.app?.mode === 'desktop', JSON.stringify(state.app));
+  step('backend reports app version', state.app?.version === '0.8.1' && state.app?.mode === 'desktop', JSON.stringify(state.app));
   await snap('01-start');
   // Route time zones: the environment dialog says which zone a route brings, and whether DST applies now.
   const tzNode = {id: 'f'.repeat(32), name: '时区自测 洛杉矶', type: 'http', geo: {label: '洛杉矶', timezone: 'America/Los_Angeles', standard: 'UTC−08:00', daylight: 'UTC−07:00', now: 'UTC−07:00', dst_now: true, source: 'exit'}};

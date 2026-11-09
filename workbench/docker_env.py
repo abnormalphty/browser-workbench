@@ -8,6 +8,7 @@ installer's default since Docker Desktop 4.83, no administrator rights), for all
 users, or wherever its uninstall entry says.
 """
 from functools import lru_cache
+import json
 import os
 import shutil
 import subprocess
@@ -34,6 +35,9 @@ ENGINE_APPS = (
 )
 PROGRAM_FILES = Path(os.environ.get('ProgramFiles', r'C:\Program Files'))
 LOCAL_APP_DATA = Path(os.environ.get('LOCALAPPDATA', str(HOME/'AppData'/'Local')))
+APP_DATA = Path(os.environ.get('APPDATA', str(HOME/'AppData'/'Roaming')))
+# Docker Desktop's own settings on Windows: settings-store.json since 4.35, settings.json before.
+DESKTOP_SETTINGS = (APP_DATA/'Docker'/'settings-store.json', APP_DATA/'Docker'/'settings.json')
 # Docker Desktop installed for this user only, then for all users.
 WINDOWS_ROOTS = (LOCAL_APP_DATA/'Programs'/'DockerDesktop', PROGRAM_FILES/'Docker'/'Docker')
 UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop'
@@ -58,6 +62,33 @@ def windows_roots():
             if isinstance(location, str) and location.strip(' "'):
                 found.append(Path(location.strip(' "')))
     return list(dict.fromkeys([*found, *WINDOWS_ROOTS]))
+
+
+def desktop_settings():
+    """Docker Desktop's settings on Windows, with keys in lower case (their spelling changed over versions)."""
+    for path in DESKTOP_SETTINGS:
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            return {str(key).lower(): value for key, value in data.items()}
+    return {}
+
+
+def uses_wsl():
+    """False only where Docker Desktop is set to its Hyper-V engine, which does not run on WSL 2."""
+    return desktop_settings().get('wslengineenabled') is not False
+
+
+def wsl_data_dir():
+    """Where Docker Desktop keeps its Linux disk with the WSL 2 engine: every image, container and volume,
+    so the browser image and each environment's login data. Changed in Docker Desktop's settings
+    (Resources > Advanced) or at installation (--wsl-default-data-root)."""
+    custom = desktop_settings().get('customwsldistrodir')
+    if isinstance(custom, str) and custom.strip():
+        return Path(custom.strip())
+    return LOCAL_APP_DATA/'Docker'/'wsl'
 
 
 def find_cli():

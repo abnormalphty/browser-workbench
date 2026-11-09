@@ -32,7 +32,9 @@ namespace BrowserWorkbench
         /// <summary>Only files this window saved may be revealed on request from the page.</summary>
         readonly HashSet<string> revealable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int port;
-        bool closingApproved, quitting, uiTestStarted;
+        bool closingApproved, quitting, uiTestStarted, moving;
+        /// <summary>Self-test only: the outcome of a data move, written once the backend runs again.</summary>
+        Dictionary<string, object> moveOutcome;
 
         public MainForm()
         {
@@ -146,6 +148,13 @@ namespace BrowserWorkbench
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (moving && e.CloseReason == CloseReason.UserClosing)
+            {
+                // Halfway, the data would be in two places; the move takes care of itself either way.
+                e.Cancel = true;
+                MessageBox.Show(this, "正在移动数据，请等它完成。完成后工作台会自动重新打开。", "Browser Workbench", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             if (closingApproved || e.CloseReason == CloseReason.WindowsShutDown || e.CloseReason == CloseReason.TaskManagerClosing)
             {
                 // Logging off: the backend goes, environments stop with Docker Desktop itself.
@@ -243,9 +252,9 @@ namespace BrowserWorkbench
             switch (backend.State)
             {
                 case BackendState.Starting: ShowStatus("正在启动 Browser Workbench…", "第一次启动可能需要几秒。"); break;
-                case BackendState.Ready: LoadWorkbench(backend.Port); break;
-                case BackendState.Failed: ShowStatus("Browser Workbench 没有启动", backend.Failure, isError: true); break;
-                case BackendState.Stopped: if (!quitting) ShowStatus("后台服务已停止", "浏览器环境不受影响，可以点重试重新连接。", isError: true); break;
+                case BackendState.Ready: LoadWorkbench(backend.Port); ReportMoveToUITest(); break;
+                case BackendState.Failed: ShowStatus("Browser Workbench 没有启动", backend.Failure, isError: true); ReportMoveToUITest(); break;
+                case BackendState.Stopped: if (!quitting && !moving) ShowStatus("后台服务已停止", "浏览器环境不受影响，可以点重试重新连接。", isError: true); break;
             }
         }
 
@@ -259,6 +268,14 @@ namespace BrowserWorkbench
         {
             port = 0;
             webView.CoreWebView2?.NavigateToString(StatusPage.Html(message, detail, isError));
+        }
+
+        /// <summary>New text on the status page already showing, without reloading it.</summary>
+        void UpdateStatus(string message, string detail)
+        {
+            if (port != 0 || webView.CoreWebView2 == null) return;
+            _ = webView.CoreWebView2.ExecuteScriptAsync(
+                $"document.getElementById('message').textContent={json.Serialize(message)};document.getElementById('detail').textContent={json.Serialize(detail)}");
         }
 
         bool IsWorkbench(string uri) => port != 0 && uri != null && uri.StartsWith($"http://127.0.0.1:{port}/", StringComparison.Ordinal);
@@ -427,6 +444,17 @@ namespace BrowserWorkbench
                     // Confirmed in the page; programs may still ask to save their work.
                     Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), "/r /t 0") { UseShellExecute = false, CreateNoWindow = true });
                     return Ok();
+                case "storage.chooseFolder":
+                    var picked = FolderPicker.Pick(Handle, "选择数据存放位置", body.TryGetValue("start", out var start) && start is string folder ? folder : AppPaths.DataRoot);
+                    return picked == null ? new Dictionary<string, object> { ["cancelled"] = true } : new Dictionary<string, object> { ["path"] = picked };
+                case "storage.move":
+                    // The page checked the place with the backend (storage.py) and the user confirmed.
+                    if (!(body.TryGetValue("target", out var target) && target is string root) || !AppPaths.FullPath(root)) throw new BridgeError("bad request");
+                    if (AppPaths.DataOverridden) throw new BridgeError("这个数据文件夹由启动设置指定，不能在这里移动。");
+                    if (moving || quitting) throw new BridgeError("正在移动数据或正在退出，请稍后再试。");
+                    moving = true;
+                    BeginInvoke(new Action(() => _ = MoveDataAsync(root)));
+                    return Ok();
                 default:
                     if (type != null && type.StartsWith("test.", StringComparison.Ordinal)) return await HandleUITest(type, body);
                     throw new BridgeError("unknown request");
@@ -434,6 +462,111 @@ namespace BrowserWorkbench
         }
 
         static Dictionary<string, object> Ok() => new Dictionary<string, object> { ["ok"] = true };
+
+        // MARK: Moving the data folder
+
+        /// <summary>Stops the environments and the backend, lets workbench/relocate.py copy, check and switch to the
+        /// new place, then starts the backend again, at the new place or, if anything failed, the old one.</summary>
+        async Task MoveDataAsync(string root)
+        {
+            string failure = null;
+            var source = AppPaths.DataDirectory;
+            const string patience = "请不要关闭窗口。完成后工作台会自动重新打开。";
+            try
+            {
+                var summary = backend.State == BackendState.Ready ? await backend.SummaryAsync() : null;
+                if (summary != null && summary.Active > 0)
+                {
+                    ShowStatus("正在停止浏览器环境…", "登录状态会保留。停止后开始移动数据。");
+                    if (!await backend.StopAllEnvironmentsAsync()) throw new InvalidOperationException("有浏览器环境没有停止，请先在工作台里停止它们");
+                }
+                ShowStatus("正在移动数据…", patience);
+                var stopped = new TaskCompletionSource<bool>();
+                backend.Stop(() => stopped.TrySetResult(true));
+                await stopped.Task;
+                Log($"[move] {source} -> {root}");
+                failure = await RelocateAsync(source, root, percent => UpdateStatus($"正在移动数据… {percent}%", patience));
+                Log(failure == null ? $"[move] done: {AppPaths.DataDirectory}" : "[move] failed: " + failure);
+            }
+            catch (Exception error)
+            {
+                failure = error.Message;
+                Log("[move] failed: " + error);
+            }
+            finally
+            {
+                moving = false;
+            }
+            if (UITestOutput != null)
+                moveOutcome = new Dictionary<string, object> { ["ok"] = failure == null, ["error"] = failure, ["dataDirectory"] = AppPaths.DataDirectory };
+            else if (failure != null)
+                MessageBox.Show(this, "数据没有移动：" + failure.TrimEnd('。') + "。\n\n原来的数据没有改动，工作台继续使用原来的位置。",
+                    "Browser Workbench", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (backend.State == BackendState.Ready)
+            {
+                // Stopped before the backend was: it never went away.
+                LoadWorkbench(backend.Port);
+                ReportMoveToUITest();
+            }
+            else backend.Start();
+        }
+
+        Task<string> RelocateAsync(string source, string root, Action<int> progress)
+        {
+            var finished = new TaskCompletionSource<string>();
+            var info = AppPaths.PythonProcess(new[] { "-m", "workbench.relocate", "--from", source, "--to", root, "--remember" }, new Dictionary<string, string>());
+            var process = new Process { StartInfo = info, EnableRaisingEvents = true };
+            string outcome = "移动没有完成";
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data == null || !e.Data.StartsWith("WORKBENCH_MOVE ", StringComparison.Ordinal)) return;
+                Dictionary<string, object> line;
+                try { line = json.Deserialize<Dictionary<string, object>>(e.Data.Substring(15)); }
+                catch (Exception) { return; }
+                if (line == null) return;
+                if (line.TryGetValue("progress", out var percent) && percent != null)
+                {
+                    var value = Convert.ToInt32(percent);
+                    BeginInvoke(new Action(() => progress(value)));
+                }
+                else if (line.TryGetValue("ok", out var ok) && ok is bool done)
+                {
+                    outcome = done ? null : (line.TryGetValue("error", out var error) ? error as string : null) ?? "移动没有完成";
+                }
+            };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) Log("[move] " + e.Data); };
+            process.Exited += (_, __) =>
+            {
+                try { process.WaitForExit(); } catch (Exception) { }  // the output readers reach the end first
+                finished.TrySetResult(outcome);
+                process.Dispose();
+            };
+            process.Start();
+            process.StandardInput.Close();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            return finished.Task;
+        }
+
+        static void Log(string line)
+        {
+            try
+            {
+                Directory.CreateDirectory(AppPaths.LogDirectory);
+                File.AppendAllText(AppPaths.BackendLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {line}{Environment.NewLine}");
+            }
+            catch (Exception) { }
+        }
+
+        void ReportMoveToUITest()
+        {
+            var output = UITestOutput;
+            if (moveOutcome == null || output == null) return;
+            moveOutcome["backend"] = backend.State.ToString();
+            File.WriteAllText(Path.Combine(output, "move.json"), json.Serialize(moveOutcome));
+            moveOutcome = null;
+            BeginInvoke(new Action(() => _ = QuitAsync(false)));
+        }
 
         bool enablingWsl;
 

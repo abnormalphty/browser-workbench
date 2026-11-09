@@ -59,6 +59,16 @@ class Store:
         with self.connect() as db:
             db.execute('INSERT OR REPLACE INTO settings VALUES (?, ?)', (key, json.dumps(value)))
 
+    def runtime_scope(self):
+        """Part of the names Docker gives this workbench's containers and login-data volumes. It came from
+        the data folder's path; kept here, it stays the same when the folder moves, so the environments
+        keep their login data."""
+        scope = self.get_setting('runtime_scope')
+        if not (isinstance(scope, str) and re.fullmatch(r'[a-f0-9]{12}', scope)):
+            scope = hashlib.sha256(str(self.data_dir).encode()).hexdigest()[:12]
+            self.set_setting('runtime_scope', scope)
+        return scope
+
     def resource_settings(self):
         value=self.get_setting('resource_settings',{'max_running':2})
         return {'max_running':value.get('max_running',2)}

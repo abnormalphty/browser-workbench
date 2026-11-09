@@ -19,7 +19,9 @@ Intel Mac 版本尚未构建和验证。
 
 ## Windows 版（v0.8 起）
 
-从 [v0.8.0 发布页](https://github.com/abnormalphty/browser-workbench/releases/tag/v0.8.0) 下载 `Browser-Workbench-0.8.0-x64-Setup.exe`，双击安装（只为当前用户安装，不需要管理员权限），从开始菜单或桌面打开。适用于 64 位 Windows 10（22H2）和 Windows 11。
+从 [v0.8.1 发布页](https://github.com/abnormalphty/browser-workbench/releases/tag/v0.8.1) 下载 `Browser-Workbench-0.8.1-x64-Setup.exe`，双击安装（只为当前用户安装，不需要管理员权限），从开始菜单或桌面打开。适用于 64 位 Windows 10（22H2）和 Windows 11。
+
+- **选择位置**：安装时可以选程序装在哪里；第一次安装时还可以选数据放在哪里（例如 D 盘）。由工作台替你安装 Docker Desktop 时，浏览器组件和各环境的登录状态也会放到数据旁边。
 
 - **首次运行被拦截**：安装包没有代码签名证书，Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”。打开了“智能应用控制”的电脑会直接拦下未签名程序。
 - **Docker**：需要 Docker Desktop（使用 WSL 2、Linux 容器）。没有安装时，点“同意并自动安装”，应用会完成全部准备：
@@ -28,7 +30,7 @@ Intel Mac 版本尚未构建和验证。
   - 启动 Docker Desktop，并载入安装包自带的浏览器组件。
 
   如果电脑还没开启 WSL 2，Windows 会请你授权一次，之后需要重启一次；重启后应用会自动打开并继续。也可以手动安装，装好后应用同样会自动继续。Docker Desktop 处于“Windows 容器”模式时，应用会自动切回 Linux 容器。
-- **数据**：数据库、订阅和文件传输文件夹在 `%LOCALAPPDATA%\BrowserWorkbench\Data`，日志在 `...\Logs`；各环境的 Firefox 登录数据放在 Docker 存储卷里（原因见说明）。卸载应用不会删除这些数据。
+- **数据**：数据库、订阅和文件传输文件夹默认在 `%LOCALAPPDATA%\BrowserWorkbench\Data`（或安装时选的位置）；各环境的 Firefox 登录数据放在 Docker 存储卷里（原因见说明）。“账号与资源 → 存储位置”列出每一处的位置和大小，也可以把数据移到别处。卸载应用不会删除这些数据。
 - **关闭**：关窗口即退出；有环境在运行时会询问是否一起停止。
 
 结构、数据位置与构建方法见 [Windows 版说明](docs/WINDOWS.md)。Windows 版已在 Mac 上完成构建和模拟验证，也在 GitHub 提供的 Windows 机器上跑过安装与自检，但还没有在装了 Docker Desktop 的真实 Windows 电脑上验收。
@@ -130,6 +132,16 @@ docker build -t local-browser-workbench:0.7.0 runtime
 Docker 已安装时，工作台把“启动 Docker → 等待就绪 → 准备浏览器组件”串成一次操作；已有组件会直接复用。Docker 未就绪时不再立即构建失败。页面显示正在等待还是正在准备，超时后可重试。首次启动 Docker 的条款或系统确认仍需使用者自行完成。
 
 此版本未自动修改 Docker 的代理、镜像源、CPU 或内存设置；如果下载或启动仍失败，应按实际错误排查。不要将此改动视为已验证所有内测电脑的网络与资源配置。
+
+## v0.8.1 Windows 版：选择安装和数据位置
+
+- 安装向导可以选择程序的安装位置；第一次安装时还可以选择数据的存放位置。已有数据时不会改动它。
+- 新增“账号与资源 → 存储位置”：列出程序、数据、Docker 数据的位置，每个环境的登录状态和传输文件各占多少空间。
+- 可以把数据移到其他文件夹或磁盘：先停止环境，复制后逐个文件核对，全部一致才改用新位置；原来的文件夹保留为“旧数据”，确认后可以在应用里删除。各环境的登录状态不受影响。
+- 由工作台安装 Docker Desktop 时，它的 Linux 磁盘（浏览器组件与登录状态）放在数据旁边；已经装好的 Docker Desktop，说明如何在它的设置里移动。安装前按各个磁盘分别检查剩余空间。
+- 修复：开启 WSL 2 之后还没重启时，Windows 可能已报告“虚拟机平台已开启”，工作台随即开始安装，Docker Desktop 却提示 “Virtual Machine Platform is not enabled”。现在会核对开机时间、Windows 是否在等待重启、虚拟机监控程序是否在运行，需要时先请你重启。
+- 修复：已经装好的 Docker Desktop 因为同样的原因启动不了时，工作台也会检查电脑并给出步骤（开启 WSL 2、重启，或修复被其他软件关掉的虚拟化），不再只是等待。
+- Mac 版不变，仍是 v0.7.3。
 
 ## v0.8.0 Windows 版
 

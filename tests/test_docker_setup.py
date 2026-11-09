@@ -8,13 +8,13 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from workbench import docker_setup
+from workbench import docker_setup, storage
 from workbench.app import create_app
 from workbench.docker_setup import MESSAGES, DockerSetup, SetupBlocked, blocker
 from workbench.runtime import WINDOWS_CONTAINERS, Runtime
@@ -26,7 +26,7 @@ def on_windows():
 
 
 def system(**values):
-    info = {'build': 22631, 'virtualization': True, 'vmp': True, 'wsl': '2.6.1.0'}
+    info = {'build': 22631, 'virtualization': True, 'vmp': True, 'hypervisor': True, 'reboot_pending': False, 'wsl': '2.6.1.0'}
     info.update(values)
     return info
 
@@ -40,7 +40,7 @@ class FakeRegistry:
 
     def OpenKey(self, hive, key, *args):
         if (hive, key) not in self.values:
-            raise OSError('missing')
+            raise FileNotFoundError('missing')
         return contextlib.nullcontext((hive, key))
 
     def CreateKey(self, hive, key):
@@ -70,11 +70,36 @@ class BlockerTests(unittest.TestCase):
             (system(wsl='2.0.9.0'), None, 'wsl'),
             (system(wsl=None), booted - 60, None),          # tried once; Docker Desktop offers the update itself
             (system(), None, None),
-            (system(vmp=None, virtualization=None, wsl=None), None, None),  # Windows could not tell: the installer will
+            (system(vmp=None, virtualization=None, wsl=None, hypervisor=None, reboot_pending=None), None, None),  # Windows could not tell: the installer will
+            # Switched on in this Windows session but listed as on already: it runs only after the restart.
+            (system(reboot_pending=True), booted + 60, 'restart'),
+            (system(hypervisor=False), booted + 60, 'restart'),
+            (system(vmp=None), booted + 60, 'restart'),
+            (system(), booted + 60, None),                  # it was running before: the step only updated WSL
+            # On but not running without having asked here (switched on elsewhere, or kept off).
+            (system(hypervisor=False, reboot_pending=True), None, 'restart'),
+            (system(hypervisor=False), None, 'hypervisor'),
+            (system(hypervisor=False), booted - 60, 'hypervisor'),  # restarted since, still not running
         ]
         for info, requested, expected in cases:
             with self.subTest(info=info, requested=requested):
                 self.assertEqual(blocker(info, requested, booted), expected)
+
+    def test_an_installed_docker_desktop_is_stopped_only_by_what_keeps_it_from_starting(self):
+        booted = 1000.0
+        cases = [
+            (system(wsl=None), None, None),                 # WSL's version unknown or old: Docker Desktop updates it
+            (system(wsl='2.0.9.0'), None, None),
+            (system(), None, None),
+            (system(vmp=False), None, 'wsl'),               # the platform is off: it cannot start
+            (system(vmp=False), booted + 60, 'restart'),
+            (system(hypervisor=False), None, 'hypervisor'),
+            (system(hypervisor=False, reboot_pending=True), None, 'restart'),
+            (system(virtualization=False, vmp=False), None, 'virtualization'),
+        ]
+        for info, requested, expected in cases:
+            with self.subTest(info=info, requested=requested):
+                self.assertEqual(blocker(info, requested, booted, installed=True), expected)
 
     def test_wsl_versions(self):
         self.assertTrue(docker_setup.wsl_ready('2.6.1.0'))
@@ -85,17 +110,27 @@ class BlockerTests(unittest.TestCase):
 
     def test_off_windows_nothing_is_checked(self):
         with patch('sys.platform', 'darwin'), patch.object(docker_setup, 'powershell') as shell:
-            self.assertEqual(docker_setup.check_system(), {'build': None, 'virtualization': None, 'vmp': None, 'wsl': None})
+            self.assertEqual(docker_setup.check_system(), {'build': None, 'virtualization': None, 'vmp': None, 'hypervisor': None,
+                                                           'reboot_pending': None, 'wsl': None})
         shell.assert_not_called()
 
     def test_system_check_reads_one_powershell_answer(self):
         version = SimpleNamespace(build=22631)
         with on_windows(), patch('sys.getwindowsversion', create=True, return_value=version), \
+             patch.dict('sys.modules', {'winreg': FakeRegistry()}), \
              patch.object(docker_setup, 'processor_feature', return_value=False), \
              patch.object(docker_setup, 'powershell', return_value={'hypervisor': True, 'firmware': False, 'vmp': 2, 'wsl': ''}):
             # A running hypervisor hides the firmware flag but proves virtualization works.
-            self.assertEqual(docker_setup.check_system(), {'build': 22631, 'virtualization': True, 'vmp': False, 'wsl': None})
+            self.assertEqual(docker_setup.check_system(), {'build': 22631, 'virtualization': True, 'vmp': False, 'hypervisor': True,
+                                                           'reboot_pending': False, 'wsl': None})
+        pending = FakeRegistry({('HKLM', docker_setup.REBOOT_PENDING): {}})
         with on_windows(), patch('sys.getwindowsversion', create=True, return_value=version), \
+             patch.dict('sys.modules', {'winreg': pending}), \
+             patch.object(docker_setup, 'powershell', return_value={'hypervisor': False, 'firmware': True, 'vmp': 1, 'wsl': '2.6.1.0'}):
+            found = docker_setup.check_system()
+        self.assertEqual((found['vmp'], found['hypervisor'], found['reboot_pending'], found['virtualization']), (True, False, True, True))
+        with on_windows(), patch('sys.getwindowsversion', create=True, return_value=version), \
+             patch.dict('sys.modules', {'winreg': FakeRegistry()}), \
              patch.object(docker_setup, 'powershell', side_effect=OSError('blocked')):
             self.assertEqual(docker_setup.check_system()['vmp'], None)
 
@@ -308,6 +343,16 @@ class SetupStateTests(unittest.TestCase):
         self.assertFalse(installer.exists())
         forget.assert_called_once()
 
+    def test_docker_disk_goes_next_to_a_moved_data_folder(self):
+        installer = Path('Docker Desktop Installer.exe')
+        with on_windows(), patch.dict(os.environ, {'WORKBENCH_DATA_ROOT': 'D:/Browser Workbench'}):
+            self.assertEqual(docker_setup.install_command(installer)[-1], '--wsl-default-data-root=' + str(Path('D:/Browser Workbench/Docker')))
+        # Left where the installer put it: Docker Desktop's own default place.
+        with on_windows(), patch.dict(os.environ, {'WORKBENCH_DATA_ROOT': str(storage.DEFAULT_ROOT)}):
+            self.assertEqual(docker_setup.install_command(installer)[-1], '--backend=wsl-2')
+        with on_windows(), patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(docker_setup.install_command(installer)[-1], '--backend=wsl-2')
+
     def test_agreement_covers_one_installation(self):
         setup = DockerSetup(self.folder)
         setup.accept()
@@ -344,7 +389,25 @@ class SetupStateTests(unittest.TestCase):
         setup = DockerSetup(self.folder)
         with patch('shutil.disk_usage', return_value=SimpleNamespace(free=2 * 1024 ** 3)), self.assertRaises(ValueError) as caught:
             setup.ensure_space()
-        self.assertIn('磁盘空间不够', str(caught.exception))
+        self.assertIn('空间不够', str(caught.exception))
+        self.assertIn('约需 6 GB', str(caught.exception))  # everything on one drive
+
+    def test_space_is_checked_on_each_drive_used(self):
+        setup = DockerSetup(self.folder)
+        free = {'C:': 5, 'D:': 2}
+        places = []
+        def space(place):
+            places.append(place)
+            return free[PureWindowsPath(place).drive] * 1024 ** 3
+        with patch.object(docker_setup, 'Path', PureWindowsPath), patch.object(docker_setup, 'LOCAL_APP_DATA', PureWindowsPath('C:/Users/u/AppData/Local')), \
+             patch.object(docker_setup, 'docker_data_root', return_value=PureWindowsPath('D:/BW/Docker')), \
+             patch.object(docker_setup, 'free_space', side_effect=space):
+            setup.folder = PureWindowsPath('D:/BW/Data/setup')
+            with self.assertRaises(ValueError) as caught:
+                setup.ensure_space()
+        # C: holds Docker Desktop itself (3 GB, 5 free: enough); D: the installer and its disk (3 GB, 2 free).
+        self.assertIn('D: 盘空间不够', str(caught.exception))
+        self.assertIn('约需 3 GB', str(caught.exception))
 
 
 class PreparationTests(unittest.TestCase):
@@ -395,6 +458,37 @@ class PreparationTests(unittest.TestCase):
             self.runtime._prepare_job()
         download.assert_not_called()
         self.assertIn('请先安装 Docker Desktop', self.runtime.build_error)
+
+    def test_an_installed_docker_desktop_that_cannot_start_says_what_windows_needs(self):
+        # Docker Desktop installed, WSL 2's platform off: the app asks for it instead of starting Docker Desktop,
+        # which would only show "Virtual Machine Platform is not enabled" and leave the app waiting.
+        stopped = {'docker_installed': True, 'docker_ready': False, 'image_ready': False}
+        self.runtime.setup.step = 'wsl'
+        with on_windows(), patch.object(self.runtime, 'status', return_value=stopped), \
+             patch('workbench.runtime.uses_wsl', return_value=True), patch.object(self.runtime.setup, 'fresh', return_value=False), \
+             patch.object(self.runtime.setup, 'check', return_value='wsl') as check, \
+             patch.object(self.runtime, '_open_desktop') as opened:
+            self.runtime._prepare_job()
+        check.assert_called_once_with(installed=True)
+        opened.assert_not_called()
+        self.assertEqual(self.runtime.build_error, MESSAGES['wsl'])
+        # A recent check made for installing (with stricter rules about WSL) is not reused; nothing in the way, it starts.
+        self.runtime.setup.checked_installed = False
+        with on_windows(), patch.object(self.runtime, 'status', return_value=stopped), \
+             patch('workbench.runtime.uses_wsl', return_value=True), patch.object(self.runtime.setup, 'fresh', return_value=True), \
+             patch.object(self.runtime.setup, 'check', return_value=None) as check, patch.object(self.runtime, '_open_desktop') as opened, \
+             patch('workbench.runtime.time.sleep'), patch.object(self.runtime.monitor, 'engine_info'):
+            self.runtime._prepare_job(attempts=1)
+        check.assert_called_once_with(installed=True)
+        opened.assert_called_once()
+        # Docker Desktop on its Hyper-V engine needs no WSL 2: it is started as before.
+        with on_windows(), patch.object(self.runtime, 'status', return_value=stopped), \
+             patch('workbench.runtime.uses_wsl', return_value=False), \
+             patch.object(self.runtime.setup, 'check') as check, patch.object(self.runtime, '_open_desktop') as opened, \
+             patch('workbench.runtime.time.sleep'), patch.object(self.runtime.monitor, 'engine_info'):
+            self.runtime._prepare_job(attempts=1)
+        check.assert_not_called()
+        opened.assert_called_once()
 
     def test_windows_containers_are_switched_to_linux(self):
         windows_engine = {'docker_installed': True, 'docker_ready': True, 'docker_os': 'windows', 'image_ready': False}
@@ -451,10 +545,21 @@ class ApiTests(unittest.TestCase):
             response = self.client.post('/api/runtime/docker-setup', json={'accept_terms': True}, headers=self.headers)
         self.assertEqual(response.status_code, 400)
         self.assertFalse(self.runtime.setup.accepted())
-        with on_windows(), patch.object(self.runtime, 'build') as build:
+        with on_windows(), patch.object(Runtime, 'docker', new=None), patch.object(self.runtime, 'build') as build:
             response = self.client.post('/api/runtime/docker-setup', json={}, headers=self.headers)
         self.assertEqual(response.status_code, 400)
         build.assert_not_called()
+
+    def test_an_installed_docker_desktop_gets_the_wsl_step_without_the_installers_agreement(self):
+        # Installed outside the app (the user agreed to Docker's terms there), but WSL 2 is off.
+        with on_windows(), patch.object(Runtime, 'docker', new='docker.exe'), patch.object(self.runtime, 'build') as build, \
+             patch.object(docker_setup, 'check_system', return_value=system(vmp=False)), \
+             patch.object(docker_setup, 'booted_at', return_value=0), patch.object(docker_setup, 'resume_after_restart'):
+            response = self.client.post('/api/runtime/docker-setup', json={'wsl_requested': True}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['docker_setup']['step'], 'restart')
+        build.assert_called_once()
+        self.assertFalse(self.runtime.setup.accepted())  # nothing is installed on this
 
     def test_agreeing_checks_the_pc_and_starts_the_setup(self):
         with on_windows(), patch.object(self.runtime, 'build') as build, \

@@ -1,5 +1,6 @@
 # Checks on GitHub's Windows machines: the backend's unit tests under Windows Python, and the
-# installer built on a Mac (attached to a draft release) installed and started for a self-test.
+# installer built on a Mac (attached to a draft release): its pages clicked through, installed into
+# chosen folders, started for a self-test that ends by moving the data folder, and uninstalled.
 # These machines cannot run Linux containers, so browser environments still need a real Windows PC.
 name: Windows check
 on:
@@ -38,44 +39,73 @@ jobs:
           $version = (Select-String -Path workbench/__init__.py -Pattern "__version__ = '(.+)'").Matches[0].Groups[1].Value
           gh release download "v$version" --repo $env:GITHUB_REPOSITORY --pattern "*-x64-Setup.exe" --dir installer
           Get-ChildItem installer
-      - name: Install silently
+      - name: Click through the installer's pages
         shell: pwsh
         run: |
           $setup = (Get-ChildItem installer/*-x64-Setup.exe).FullName
-          Start-Process $setup -ArgumentList '/S' -Wait
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\Browser Workbench'
+          ./tests/windows_installer_pages.ps1 -Setup $setup -Base (Join-Path $env:RUNNER_TEMP '安装 页面') -Out (Join-Path $env:RUNNER_TEMP 'ui-run\installer')
+      - name: Install silently into chosen folders
+        shell: pwsh
+        run: |
+          # Spaces and Chinese in both places, on another drive than the user's own folders.
+          $base = Join-Path $env:RUNNER_TEMP '自选 位置'
+          $app = Join-Path $base '程序 文件'
+          $data = Join-Path $base '工作台 数据'
+          $setup = (Get-ChildItem installer/*-x64-Setup.exe).FullName
+          Start-Process $setup -ArgumentList "/S /DATA=$data /D=$app" -Wait  # /D= last, never quoted
           Get-ChildItem $app
           if (-not (Test-Path (Join-Path $app 'BrowserWorkbench.exe'))) { throw 'not installed' }
-          if (-not (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Browser Workbench.lnk'))) { throw 'no Start menu shortcut' }
+          $location = (Get-ItemProperty 'HKCU:\Software\BrowserWorkbench').DataLocation
+          if ($location -ne $data) { throw "data place recorded as '$location'" }
+          $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Browser Workbench.lnk'
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+          if ($target -ne (Join-Path $app 'BrowserWorkbench.exe')) { throw "Start menu shortcut opens '$target'" }
           # Windows has no system time zone database: the bundled Python must bring its own.
           & (Join-Path $app 'python\python.exe') -E -s -X utf8 -c "import zoneinfo; print(zoneinfo.ZoneInfo('Asia/Tokyo'), zoneinfo.ZoneInfo('America/New_York'))"
           if ($LASTEXITCODE -ne 0) { throw 'the bundled Python cannot read time zones' }
-      - name: Start the app and run the self-test
+      - name: Start the app, run the self-test and move the data folder
         shell: pwsh
         run: |
+          $base = Join-Path $env:RUNNER_TEMP '自选 位置'
+          $app = Join-Path $base '程序 文件'
+          $data = Join-Path $base '工作台 数据'
+          $moved = Join-Path $base '移动 之后'
           $run = Join-Path $env:RUNNER_TEMP 'ui-run'
           New-Item -ItemType Directory -Force "$run/out" | Out-Null
-          $env:BROWSER_WORKBENCH_DATA_DIR = "$run/App Data/BrowserWorkbench"
+          # The installer's data place, not a test folder: the self-test moves it.
+          $expected = @{ data = $data; install = $app; moveTo = $moved } | ConvertTo-Json -Compress
+          (Get-Content tests/ui/windows_smoke.js -Raw -Encoding utf8).Replace('/*EXPECTED*/null', $expected) | Set-Content "$run/windows_smoke.js" -Encoding utf8
           $env:BROWSER_WORKBENCH_LOG_DIR = "$run/logs"
-          $env:BROWSER_WORKBENCH_UI_TEST = (Resolve-Path tests/ui/windows_smoke.js).Path
+          $env:BROWSER_WORKBENCH_UI_TEST = "$run/windows_smoke.js"
           $env:BROWSER_WORKBENCH_UI_TEST_OUT = "$run/out"
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Browser Workbench\BrowserWorkbench.exe'
-          $process = Start-Process $exe -PassThru
+          $process = Start-Process (Join-Path $app 'BrowserWorkbench.exe') -PassThru
           $deadline = (Get-Date).AddMinutes(15)  # includes the WSL step
-          while (-not (Test-Path "$run/out/result.json") -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
+          while (-not (Test-Path "$run/out/move.json") -and -not $process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
           $process.WaitForExit(60000) | Out-Null
-          Get-Content "$run/logs/*" -ErrorAction SilentlyContinue | Select-Object -Last 40
+          Get-Content "$run/logs/*" -ErrorAction SilentlyContinue | Select-Object -Last 60
           $report = Get-Content "$run/out/result.json" -Raw | ConvertFrom-Json
           $report.result.steps | Format-Table ok, name, detail -AutoSize -Wrap
           if (-not $report.ok -or $report.result.failed.Count -gt 0) { throw 'self-test failed' }
+          $move = Get-Content "$run/out/move.json" -Raw | ConvertFrom-Json
+          $move | Format-List
+          if (-not $move.ok -or $move.backend -ne 'Ready' -or $move.dataDirectory -ne (Join-Path $moved 'Data')) { throw 'moving the data folder failed' }
+          if (-not (Test-Path (Join-Path $moved 'Data\workbench.sqlite3'))) { throw 'the database is not at the new place' }
+          if (-not (Test-Path (Join-Path $data '旧数据（已移到新位置，可以删除）\workbench.sqlite3'))) { throw 'the old copy is not kept under its clear name' }
+          if (Test-Path (Join-Path $data 'Data')) { throw 'the old Data folder is still in use' }
+          $location = (Get-ItemProperty 'HKCU:\Software\BrowserWorkbench').DataLocation
+          if ($location -ne $moved) { throw "data place recorded as '$location'" }
           if (-not $process.HasExited) { throw 'the app did not quit' }
-      - name: Uninstall silently
+      - name: Uninstall silently; the data stays
         shell: pwsh
         run: |
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\Browser Workbench'
+          $base = Join-Path $env:RUNNER_TEMP '自选 位置'
+          $app = Join-Path $base '程序 文件'
+          $moved = Join-Path $base '移动 之后'
           Start-Process (Join-Path $app 'Uninstall.exe') -ArgumentList '/S' -Wait
-          Start-Sleep 5
+          # The uninstaller runs from a copy of itself: wait for the program to go.
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $app 'BrowserWorkbench.exe')); $i++) { Start-Sleep 1 }
           if (Test-Path (Join-Path $app 'BrowserWorkbench.exe')) { throw 'uninstall left the program behind' }
+          if (-not (Test-Path (Join-Path $moved 'Data\workbench.sqlite3'))) { throw 'uninstalling removed the data' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

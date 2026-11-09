@@ -43,6 +43,7 @@ const paths = {
   keyboard:'<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01m3.5 0h.01m3.5 0h.01m3.5 0h.01M7.5 14h9"/>',
   reconnect:'<path d="M3 12a9 9 0 0 1 15.5-6.3L21 8m0-5v5h-5m5 4a9 9 0 0 1-15.5 6.3L3 16m0 5v-5h5"/>',
   sliders:'<path d="M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
 };
 const icon = name => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.grid}</svg></span>`;
 function paintIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{e.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${paths[e.dataset.icon]||paths.grid}</svg>`;e.removeAttribute('data-icon');});}
@@ -73,10 +74,11 @@ function updateRuntime(){
   const preparing=r.build_state==='building';
   const progress=['loading_image','downloading_docker'].includes(r.prepare_phase)&&r.prepare_progress!=null?` ${r.prepare_progress}%`:'';
   const phaseTitle=(phases[r.prepare_phase]||'正在准备运行组件')+progress;
-  const step=auto?setup.step:null;
+  // Steps come before installing, and for an installed Docker Desktop that cannot start yet (WSL 2 off, restart due).
+  const step=setup&&!(auto&&!setup.terms_accepted)?setup.step:null;
   const megabytes=value=>Math.round((value||0)/1048576);
   const downloaded=auto&&setup.total?`已下载 ${megabytes(setup.downloaded)} / ${megabytes(setup.total)} MB。`:'';
-  const stepTitle={wsl:'还差一步：开启 WSL 2',restart:'重启电脑后继续安装',virtualization:'需要开启 CPU 虚拟化',windows:'需要更新 Windows'}[step];
+  const stepTitle={wsl:'还差一步：开启 WSL 2',restart:'重启电脑后继续',hypervisor:'Windows 的虚拟化没有运行',virtualization:'需要开启 CPU 虚拟化',windows:'需要更新 Windows'}[step];
   $('sidebarStatus').textContent=ready?'运行组件已就绪':wslBusy?'正在开启 WSL 2':stepTitle||(preparing?phaseTitle:!r.docker_installed?'需要安装 Docker':r.docker_ready?'浏览器组件待准备':'运行组件未就绪');
   $('sidebarDot').className='dot '+(ready?'green':'amber');
   $('setupBanner').hidden=ready;
@@ -85,7 +87,7 @@ function updateRuntime(){
   $('setupDescription').textContent=wslBusy?'请在“用户账户控制”窗口点“是”。命令行窗口会显示进度，完成后自动关闭。':step?setup.message+(preparing&&downloaded?` ${downloaded}`:''):preparing?(busyText[r.prepare_phase]||'工作台会自动启动后台服务，再继续准备浏览器组件。'):!r.docker_installed?(auto?(setup.terms_accepted&&r.build_error?r.build_error:'浏览器环境运行在 Docker 里。点“查看状态”，工作台可以自动下载并安装 Docker Desktop。'):'浏览器环境运行在 Docker 里。点“查看状态”按步骤安装，装好后回到这里会自动继续。'):r.build_error||'点击一键准备，自动完成后台启动与浏览器组件准备。';
   const memory=state.resources?.engine?.memory_mb;
   const dockerValue=r.docker_installed?(r.engine_app||'已安装'):preparing&&r.prepare_phase==='downloading_docker'?'下载中'+progress+(auto&&setup.total?` · ${megabytes(setup.downloaded)} / ${megabytes(setup.total)} MB`:''):preparing&&r.prepare_phase==='installing_docker'?'安装中…':auto&&setup.total&&setup.downloaded>=setup.total?'安装包已下载':'待安装';
-  const wslRow=auto&&setup.wsl?[['WSL 2',{ready:'已开启',wsl:wslBusy?'正在开启…':'需要开启',restart:'重启后生效'}[setup.wsl]]]:[];
+  const wslRow=(auto||step)&&setup.wsl?[['WSL 2',{ready:'已开启',wsl:wslBusy?'正在开启…':'需要开启',restart:'重启后生效',hypervisor:'已开启，还没有运行'}[setup.wsl]]]:[];
   $('runtimeChecklist').innerHTML=[['Docker',dockerValue],...wslRow,['后台运行状态',r.docker_ready?'已启动':'未启动'],['浏览器与画面组件',r.image_ready?'已就绪':preparing&&['loading_image','building'].includes(r.prepare_phase)?'准备中…'+progress:'待准备'],...(r.docker_ready&&memory?[['Docker 可分配内存',`${gigabytes(memory)} · 约可同时运行 ${Math.max(1,Math.floor((memory-512)/2048))} 个 2 GB 环境`]]:[])].map(([title,value])=>`<div class="runtime-check">${title}<span>${esc(value)}</span></div>`).join('');
   $('runtimeInstall').hidden=r.docker_installed||auto;
   $('runtimeAuto').hidden=!auto||setup.terms_accepted;
@@ -93,16 +95,22 @@ function updateRuntime(){
   // A step the user must take is guidance, not a failure; an unrelated error (a broken download) still shows.
   // Before the user agreed, the backend's "install Docker first" is what the panel above already offers.
   const notice=auto&&!setup.terms_accepted?'':step?[r.build_error&&r.build_error!==setup.message?r.build_error:'',setup.message].filter(Boolean).join('\n'):r.build_error;
-  $('runtimeError').hidden=!notice;$('runtimeError').textContent=notice||'';$('runtimeError').className='inline-message'+(['wsl','restart'].includes(step)?'':' error');
+  $('runtimeError').hidden=!notice;$('runtimeError').textContent=notice||'';$('runtimeError').className='inline-message'+(['wsl','restart','hypervisor'].includes(step)?'':' error');
   let label,disabled=false;
   if(ready)label='组件已就绪';
   else if(auto){
     if(wslBusy){label='正在开启 WSL 2…';disabled=true;}
     else if(!setup.terms_accepted)label='同意并自动安装';
     else if(step==='wsl')label=native?'开启 WSL 2（需要管理员授权）':'查看开启方法';
-    else if(step==='restart'&&native)label='立即重启电脑';
+    else if(['restart','hypervisor'].includes(step)&&native)label='立即重启电脑';
     else if(preparing){label='正在自动安装…';disabled=true;}
     else label=step?'重新检查':r.build_state==='error'?'重试自动安装':'继续自动安装';
+  }else if(step){
+    // Docker Desktop is installed but Windows must go first.
+    if(wslBusy){label='正在开启 WSL 2…';disabled=true;}
+    else if(step==='wsl')label=native?'开启 WSL 2（需要管理员授权）':'查看开启方法';
+    else if(['restart','hypervisor'].includes(step)&&native)label='立即重启电脑';
+    else label='重新检查';
   }else{label=!r.docker_installed?'下载 Docker Desktop':preparing?'正在准备…':r.build_state==='error'?'重试一键准备':'一键准备运行组件';disabled=preparing;}
   $('runtimePrimary').textContent=label;$('runtimePrimary').disabled=disabled;
 }
@@ -119,13 +127,13 @@ async function enableWsl(){
     const result=await native.call('setup.enableWsl');
     if(result?.cancelled){toast('开启 WSL 2 需要管理员授权。请再点一次，并在“用户账户控制”窗口点“是”。',true);return;}
     const setup=await dockerSetup({wsl_requested:true});
-    toast(setup.step==='restart'?'WSL 2 已开启，重启电脑后生效。':'WSL 2 已开启，正在继续安装 Docker Desktop。');
+    toast(setup.step==='restart'?'WSL 2 已开启，重启电脑后生效。':state.runtime.docker_installed?'WSL 2 已开启，正在启动 Docker Desktop。':'WSL 2 已开启，正在继续安装 Docker Desktop。');
   }catch(e){toast(e.message,true);}
   finally{wslBusy=false;updateRuntime();await refresh();}
 }
 function confirmRestart(){
   $('confirmTitle').textContent='现在重启电脑？';
-  $('confirmMessage').textContent='WSL 2 要重启后才生效。请先保存其他程序里的工作。重启后 Browser Workbench 会自动打开，继续安装 Docker Desktop。';
+  $('confirmMessage').textContent='WSL 2 要重启电脑后才生效。请先保存其他程序里的工作。重启后 Browser Workbench 会自动打开并继续。';
   $('confirmAction').textContent='立即重启';$('confirmAction').className='button primary';
   $('confirmAction').onclick=async()=>{try{await native.call('setup.restart');hideDialog('confirmDialog');}catch(e){toast(e.message,true);}};
   showDialog('confirmDialog');
@@ -272,11 +280,11 @@ $('toggleUrl').onclick=()=>$('subscriptionUrl').type=$('subscriptionUrl').type==
 $('runtimeButton').onclick=$('setupAction').onclick=()=>{updateRuntime();showDialog('runtimeDialog');};
 $('runtimePrimary').onclick=async()=>{
   try{const r=state.runtime,setup=r.docker_setup;
-    if(!r.docker_installed&&setup){
-      if(!setup.terms_accepted){const next=await dockerSetup({accept_terms:true});toast('已开始自动安装 Docker Desktop。');if(next.step==='wsl'&&native)await enableWsl();return;}
+    if(setup&&(!r.docker_installed||setup.step)){
+      if(!r.docker_installed&&!setup.terms_accepted){const next=await dockerSetup({accept_terms:true});toast('已开始自动安装 Docker Desktop。');if(next.step==='wsl'&&native)await enableWsl();return;}
       if(setup.step==='wsl'){await enableWsl();return;}
-      if(setup.step==='restart'&&native){confirmRestart();return;}
-      await dockerSetup();toast('正在继续自动安装 Docker Desktop。');return;
+      if(['restart','hypervisor'].includes(setup.step)&&native){confirmRestart();return;}
+      await dockerSetup();toast(r.docker_installed?'正在重新检查这台电脑。':'正在继续自动安装 Docker Desktop。');return;
     }
     if(!r.docker_installed){openExternal(r.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。安装并打开后，工作台会自动继续。');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
 };
@@ -502,3 +510,58 @@ $('limitsForm').onsubmit=async event=>{event.preventDefault();$('saveLimits').di
 $('accountForm').onsubmit=async event=>{event.preventDefault();$('saveAccount').disabled=true;try{await api(`environments/${accountEnvironmentId}/account`,{method:'PATCH',body:{label:$('accountLabelInput').value,plan:$('accountPlanInput').value,status:$('accountStatusInput').value}});await refresh();updateAccountEvidence(state.environments.find(e=>e.id===accountEnvironmentId));toast('账号信息已保存为手动记录。');}catch(e){toast(e.message,true);}finally{$('saveAccount').disabled=false;}};
 $('checkAccount').onclick=async()=>{if(checkingAccount)return;const checkedId=accountEnvironmentId;checkingAccount=true;$('saveAccount').disabled=true;updateAccountEvidence(state.environments.find(e=>e.id===accountEnvironmentId));try{const result=await api(`environments/${checkedId}/account/check`,{method:'POST'});await refresh();const e=state.environments.find(e=>e.id===checkedId);if(accountEnvironmentId===checkedId&&e){$('accountPlanInput').value=e.account.plan||'unknown';$('accountStatusInput').value=e.account.status||'unknown';}toast(result.verified?'账号信息已核对。':'未能确认，已保留上次记录；可以手动标记。',!result.verified);}catch(e){toast(e.message,true);}finally{checkingAccount=false;$('saveAccount').disabled=false;const e=state.environments.find(e=>e.id===accountEnvironmentId);if(e)updateAccountEvidence(e);}};
 document.addEventListener('click',async event=>{const button=event.target.closest('[data-manage]');if(!button)return;const id=button.dataset.id,kind=button.dataset.manage;try{if(kind==='account'){showAccount(id);return;}if(kind==='limits'){showLimits(id);return;}button.disabled=true;if(kind==='pause'||kind==='resume'||kind==='stop'){await api(`environments/${id}/${kind}`,{method:'POST'});toast(kind==='pause'?'环境已进入低功耗，内存仍保留。':kind==='resume'?'环境已唤醒。':'环境已停止，内存已释放。');await refresh();return;}if(kind==='open'){const e=state.environments.find(e=>e.id===id);if(e.runtime.status==='paused'){await api(`environments/${id}/resume`,{method:'POST'});pendingOpen=id;await refresh();}else if(e.runtime.status==='running')await openBrowser(id);else if(e.node_id)await startEnvironment(id);else{editEnvironment(id);$('autoOpenOption').hidden=false;$('autoOpen').checked=true;toast('请绑定线路，或明确勾选无代理测试。');}}}catch(e){toast(e.message,true);}finally{button.disabled=false;}});
+
+// Where things are kept (Windows app): the data folder, Docker's disk with each environment's login data,
+// and the program. The data folder can move; the window stops everything and moves it (workbench/relocate.py).
+let storageState=null, storageLoads=0;
+function storageSize(bytes){const gb=1073741824;return bytes==null?'—':bytes>=gb?(bytes/gb).toFixed(bytes>=10*gb?0:1)+' GB':bytes>=1048576?Math.round(bytes/1048576)+' MB':bytes>=1024?Math.round(bytes/1024)+' KB':bytes+' B';}
+function storageRow(path,detail,buttons=''){return `<div class="transfer-file"><div><strong class="storage-path">${esc(path)}</strong>${detail?`<small>${esc(detail)}</small>`:''}</div>${buttons?`<div class="transfer-actions">${buttons}</div>`:''}</div>`;}
+function storageSection(title,copy,rows,extra='',action=''){return `<section class="transfer-section"><div class="transfer-heading"><h3>${title}</h3>${action}</div><p>${copy}</p><div class="transfer-list">${rows}</div>${extra}</section>`;}
+function renderStorage(){
+  const s=storageState;if(!s)return;
+  const open=which=>`<button class="button secondary" data-storage-open="${which}">打开</button>`;
+  const free=bytes=>bytes==null?'':` · 这个磁盘还剩 ${storageSize(bytes)}`;
+  const parts=[storageSection('数据','订阅、环境列表，以及各环境“电脑传入 / 环境下载”的文件。',storageRow(s.data_dir,`共 ${storageSize(s.data_bytes)}${free(s.free_bytes)}`,open('data')),'',s.can_move?'<button class="text-button" data-storage-move>更改位置…</button>':'')];
+  const d=s.docker;
+  if(d)parts.push(d.installed
+    ?storageSection('浏览器组件和登录状态','由 Docker Desktop 保存：浏览器组件，以及每个环境的登录状态、Cookie 和浏览记录。',storageRow(d.folder,`Docker 数据 ${storageSize(d.bytes)}${free(d.free_bytes)}`,open('docker')),'<p class="transfer-note">要移到其他磁盘：先停止所有环境，打开 Docker Desktop → Settings → Resources → Advanced，在 Disk image location 选新文件夹，再点 Apply &amp; restart。登录状态会一起移过去。</p>')
+    :storageSection('浏览器组件和登录状态','还没有安装 Docker Desktop。由工作台替你安装时，浏览器组件和各环境的登录状态会放在：',storageRow(d.folder,`这个磁盘还剩 ${storageSize(d.free_bytes)}`)));
+  const envRows=s.environments.map(e=>`<div class="transfer-file"><div><strong>${esc(e.name)}</strong><small>${s.profiles_in_docker?`登录状态 ${storageSize(e.volume_bytes)} · 传输的文件 ${storageSize(e.folder_bytes)}`:`登录状态和文件 ${storageSize(e.folder_bytes)}`}</small></div></div>`).join('')||'<div class="transfer-empty">还没有环境。</div>';
+  const unknown=s.profiles_in_docker&&s.environments.length&&s.environments.every(e=>e.volume_bytes==null);
+  parts.push(storageSection('各环境占用',s.profiles_in_docker?`登录状态在 Docker 里（上面那一处），传输的文件在数据文件夹里。删除环境会一起删掉这两部分。${unknown?'Docker 现在没有运行，登录状态的大小暂时统计不了。':''}`:'都在数据文件夹里。',envRows));
+  if(s.old_copies.length)parts.push(storageSection('移动前的旧数据','移动数据后留下的原文件夹。确认新位置一切正常后，可以删除它释放空间。',s.old_copies.map((c,i)=>storageRow(c.folder,`共 ${storageSize(c.bytes)}`,`<button class="button secondary" data-storage-old="${i}">打开</button><button class="button danger" data-storage-delete="${i}">删除…</button>`)).join('')));
+  if(s.install_dir)parts.push(storageSection('程序','程序文件夹。重新运行安装程序可以装到别处，数据不受影响。',storageRow(s.install_dir,'',open('install'))));
+  $('storageContent').innerHTML=parts.join('');
+}
+async function loadStorage(){
+  const load=++storageLoads;$('refreshStorage').disabled=true;
+  if(!storageState)$('storageContent').innerHTML='<div class="transfer-list"><div class="transfer-empty">正在统计…</div></div>';
+  try{const s=await api('storage');if(load===storageLoads){storageState=s;renderStorage();}}
+  catch(e){if(load===storageLoads){$('storageContent').innerHTML=`<div class="inline-message error">${esc(e.message)}</div>`;}}
+  finally{if(load===storageLoads)$('refreshStorage').disabled=false;}
+}
+function confirmStorage(title,message,label,kind,run){
+  $('confirmTitle').textContent=title;$('confirmMessage').textContent=message;$('confirmAction').textContent=label;$('confirmAction').className='button '+kind;
+  $('confirmAction').onclick=async()=>{$('confirmAction').disabled=true;try{await run();}catch(e){toast(e.message,true);}finally{$('confirmAction').disabled=false;}};
+  showDialog('confirmDialog');
+}
+async function moveStorage(){
+  const picked=await native.call('storage.chooseFolder');
+  if(!picked||picked.cancelled)return;
+  const target=await api('storage/check',{method:'POST',body:{path:picked.path}});
+  const active=state.environments.filter(e=>['running','starting','paused'].includes(e.runtime?.status)).length;
+  confirmStorage('把数据移到新位置？',`数据（约 ${storageSize(target.bytes)}）会复制到“${target.data_dir}”，逐个文件核对无误后才改用新位置。${active?`正在运行的 ${active} 个环境会先停止。`:''}移动时窗口显示进度，完成后自动重新打开工作台。各环境的登录状态在 Docker 里，不受影响。原来的文件夹会保留为“旧数据”，确认没问题后可以在“存储位置”里删除。`,'开始移动','primary',async()=>{await native.call('storage.move',{target:target.root});hideDialog('confirmDialog');hideDialog('storageDialog');});
+}
+if(native&&onWindows)$('storageSettings').hidden=false;
+$('storageSettings').onclick=()=>{showDialog('storageDialog');loadStorage();};
+$('refreshStorage').onclick=()=>loadStorage();
+$('storageContent').addEventListener('click',async event=>{
+  const button=event.target.closest('button');if(!button||!storageState)return;
+  try{
+    if(button.dataset.storageOpen){await api('storage/open',{method:'POST',body:{which:button.dataset.storageOpen}});}
+    else if(button.dataset.storageOld){await api('storage/open',{method:'POST',body:{which:'old',folder:storageState.old_copies[Number(button.dataset.storageOld)].folder}});}
+    else if(button.dataset.storageMove!==undefined){button.disabled=true;try{await moveStorage();}finally{button.disabled=false;}}
+    else if(button.dataset.storageDelete){const copy=storageState.old_copies[Number(button.dataset.storageDelete)];
+      confirmStorage('删除旧数据？',`将永久删除“${copy.folder}”（约 ${storageSize(copy.bytes)}），删除后无法恢复。这是移动数据前留下的副本；现在用的数据在“${storageState.data_dir}”，不受影响。`,'删除旧数据','danger',async()=>{await api('storage/delete-old',{method:'POST',body:{folder:copy.folder}});hideDialog('confirmDialog');toast('旧数据已删除。');await loadStorage();});}
+  }catch(e){toast(e.message,true);}
+});

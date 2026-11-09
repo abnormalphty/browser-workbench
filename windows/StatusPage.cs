@@ -21,7 +21,7 @@ namespace BrowserWorkbench
                 "a.primary{background:#21644e;border-color:#21644e;color:#fff}" +
                 "@media(prefers-color-scheme:dark){body{background:#191c1b;color:#e8edea}p{color:#8d9792}.spinner{border-color:#2c3230;border-top-color:#6fcca4}" +
                 "a{background:#232827;border-color:rgba(255,255,255,.12);color:#e8edea}a.primary{background:#2a8262;border-color:#2a8262}}</style>" +
-                $"<div class=card><div class=mark>境</div><h1>{WebUtility.HtmlEncode(message)}</h1><p>{WebUtility.HtmlEncode(detail)}</p>{actions}</div></html>";
+                $"<div class=card><div class=mark>境</div><h1 id=message>{WebUtility.HtmlEncode(message)}</h1><p id=detail>{WebUtility.HtmlEncode(detail)}</p>{actions}</div></html>";
         }
     }
 }

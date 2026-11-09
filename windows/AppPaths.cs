@@ -5,6 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 
 namespace BrowserWorkbench
 {
@@ -17,12 +18,39 @@ namespace BrowserWorkbench
             return string.IsNullOrEmpty(value) ? null : value;
         }
 
-        static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrowserWorkbench");
+        /// <summary>Logs, the window's own browser data and its position always stay here.</summary>
+        public static string DefaultRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrowserWorkbench");
 
-        public static string DataDirectory => Custom("BROWSER_WORKBENCH_DATA_DIR") ?? Path.Combine(Root, "Data");
-        public static string LogDirectory => Custom("BROWSER_WORKBENCH_LOG_DIR") ?? Path.Combine(Root, "Logs");
-        public static string WebViewDirectory => Custom("BROWSER_WORKBENCH_WEBVIEW_DIR") ?? Path.Combine(Root, "WebView2");
-        public static string WindowState => Path.Combine(Root, "window.txt");
+        /// <summary>Where the user keeps the data: chosen in the installer or moved in the app (workbench/relocate.py
+        /// records it), otherwise the default. The data itself is in its Data folder.</summary>
+        public static string DataRoot
+        {
+            get
+            {
+                try
+                {
+                    using (var key = Registry.CurrentUser.OpenSubKey(SettingsKey))
+                        if (key?.GetValue("DataLocation") is string chosen && FullPath(chosen.Trim()))
+                            return chosen.Trim();
+                }
+                catch (Exception) { }
+                return DefaultRoot;
+            }
+        }
+
+        public const string SettingsKey = @"Software\BrowserWorkbench";
+
+        /// <summary>A whole path such as D:\Data: not "D:" or "\Data", which depend on the current folder.</summary>
+        public static bool FullPath(string path) =>
+            path != null && (path.Length >= 3 && char.IsLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
+                || path.StartsWith(@"\\", StringComparison.Ordinal));
+
+        /// <summary>Tests point the app at disposable data; such a folder is never moved.</summary>
+        public static bool DataOverridden => Custom("BROWSER_WORKBENCH_DATA_DIR") != null;
+        public static string DataDirectory => Custom("BROWSER_WORKBENCH_DATA_DIR") ?? Path.Combine(DataRoot, "Data");
+        public static string LogDirectory => Custom("BROWSER_WORKBENCH_LOG_DIR") ?? Path.Combine(DefaultRoot, "Logs");
+        public static string WebViewDirectory => Custom("BROWSER_WORKBENCH_WEBVIEW_DIR") ?? Path.Combine(DefaultRoot, "WebView2");
+        public static string WindowState => Path.Combine(DefaultRoot, "window.txt");
         public static string DownloadsDirectory => Custom("BROWSER_WORKBENCH_DOWNLOADS_DIR") ?? KnownDownloads();
         public static string BackendLog => Path.Combine(LogDirectory, "backend.log");
 
