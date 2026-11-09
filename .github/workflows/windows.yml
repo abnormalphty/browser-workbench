@@ -57,8 +57,9 @@ jobs:
           if (-not (Test-Path (Join-Path $app 'BrowserWorkbench.exe'))) { throw 'not installed' }
           $location = (Get-ItemProperty 'HKCU:\Software\BrowserWorkbench').DataLocation
           if ($location -ne $data) { throw "data place recorded as '$location'" }
-          $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Browser Workbench.lnk'
-          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+          # Read through the Shell: WScript.Shell turns Chinese into '?'.
+          $menu = (New-Object -ComObject Shell.Application).NameSpace((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))
+          $target = $menu.ParseName('Browser Workbench.lnk').GetLink.Path
           if ($target -ne (Join-Path $app 'BrowserWorkbench.exe')) { throw "Start menu shortcut opens '$target'" }
           # Windows has no system time zone database: the bundled Python must bring its own.
           & (Join-Path $app 'python\python.exe') -E -s -X utf8 -c "import zoneinfo; print(zoneinfo.ZoneInfo('Asia/Tokyo'), zoneinfo.ZoneInfo('America/New_York'))"

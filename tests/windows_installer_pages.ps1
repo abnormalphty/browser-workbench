@@ -200,8 +200,10 @@ catch {
 Check 'program installed in the subfolder' (Test-Path (Join-Path $program 'BrowserWorkbench.exe')) $program
 $location = (Get-ItemProperty 'HKCU:\Software\BrowserWorkbench' -ErrorAction SilentlyContinue).DataLocation
 Check 'the data place is recorded for the app' ($location -eq $dataRoot) "$location"
-$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Browser Workbench.lnk'))
-Check 'Start menu shortcut opens the chosen folder' ($shortcut.TargetPath -eq (Join-Path $program 'BrowserWorkbench.exe')) $shortcut.TargetPath
+# Read through the Shell: WScript.Shell turns characters outside the ANSI code page into '?'.
+$menu = (New-Object -ComObject Shell.Application).NameSpace((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))
+$target = $menu.ParseName('Browser Workbench.lnk').GetLink.Path
+Check 'Start menu shortcut opens the chosen folder' ($target -eq (Join-Path $program 'BrowserWorkbench.exe')) $target
 
 # The uninstaller copies itself elsewhere and returns at once: wait for the program to go.
 if (Test-Path (Join-Path $program 'Uninstall.exe')) { Start-Process (Join-Path $program 'Uninstall.exe') -ArgumentList '/S' -Wait }

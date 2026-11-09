@@ -178,6 +178,14 @@ Function CheckWritable
   ${EndIf}
 FunctionEnd
 
+; A leave function's change to the page's folder lasts only if the field shows it too: NSIS reads the
+; field into the variable again once the leave function has finished (Ui.c, WM_NOTIFY_INIGO_MONTOYA).
+!macro ShowFolder VALUE
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  GetDlgItem $1 $0 1019
+  SendMessage $1 ${WM_SETTEXT} 0 "STR:${VALUE}"
+!macroend
+
 ; $R2 = 1 if folder $R0 is folder $R1 or inside it (compared as Windows does, ignoring case).
 Function IsInside
   StrCpy $R2 0
@@ -207,6 +215,7 @@ Function InstallFolderLeave
   ${EndIf}
   StrCpy $R0 $INSTDIR
   Call CheckWritable
+  !insertmacro ShowFolder $INSTDIR
 FunctionEnd
 
 Function DataFolderPre
@@ -281,6 +290,7 @@ Function DataFolderLeave
   ${EndIf}
   StrCpy $R0 $DataRoot
   Call CheckWritable
+  !insertmacro ShowFolder $DataRoot
 FunctionEnd
 
 ; Windows 11 and most Windows 10 PCs already have the WebView2 runtime; install it otherwise.

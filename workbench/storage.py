@@ -151,9 +151,10 @@ def overview(store, runtime):
     """Everything the storage dialog shows. Sizes are added up now, so this takes a moment."""
     data_dir = store.data_dir
     volumes = runtime.volume_profiles()
-    sizes = volume_sizes(runtime.docker) if volumes else {}
+    listed = store.list_environments()
+    sizes = volume_sizes(runtime.docker) if volumes and listed else {}
     environments = []
-    for env in store.list_environments():
+    for env in listed:
         folder = data_dir / 'environments' / env['id']
         item = {'id': env['id'], 'name': env['name'], 'folder': str(folder), 'folder_bytes': folder_size(folder)}
         if volumes:
