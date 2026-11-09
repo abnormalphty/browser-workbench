@@ -213,6 +213,29 @@ class RelocateTests(unittest.TestCase):
             relocate.relocate(self.source, self.source / 'inner')
         self.assertEqual(relocate.listing(self.source), self.before)
 
+    def test_a_folder_held_for_a_moment_is_renamed_once_free(self):
+        source = fill(self.base / 'old' / 'Data')
+        real, calls = Path.rename, []
+
+        def held_at_first(path, target):
+            calls.append(path.name)
+            if len(calls) <= 2:  # a virus scan holds a file just written
+                raise PermissionError(13, 'in use')
+            return real(path, target)
+        with patch.object(Path, 'rename', held_at_first), patch.object(relocate, 'RENAME_WAIT', 0):
+            relocate.relocate(source, self.base / 'new')
+        self.assertTrue((self.base / 'new' / 'Data' / 'workbench.sqlite3').is_file())
+        self.assertTrue((self.base / 'old' / storage.OLD_COPY).is_dir())
+        self.assertEqual(calls[:3], ['Data.partial'] * 3)
+        # Held for good: the move is undone and the old folder keeps being used.
+        source = fill(self.base / 'again' / 'Data')
+        with patch.object(Path, 'rename', side_effect=PermissionError(13, 'in use')), patch.object(relocate, 'RENAME_WAIT', 0), \
+             self.assertRaises(PermissionError):
+            relocate.relocate(source, self.base / 'elsewhere')
+        self.assertFalse((self.base / 'elsewhere' / 'Data').exists())
+        self.assertFalse((self.base / 'elsewhere' / 'Data.partial').exists())
+        self.assertTrue((source / 'workbench.sqlite3').is_file())
+
     def test_moving_again_lists_every_old_copy(self):
         relocate.relocate(self.source, self.base / 'second')
         record = relocate.relocate(self.base / 'second' / 'Data', self.base / 'third')

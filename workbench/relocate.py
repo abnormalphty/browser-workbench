@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,9 @@ from .storage import DATA, MOVE_RECORD, OLD_COPY, inside, old_copies, remove_tre
 
 SETTINGS_KEY = r'Software\BrowserWorkbench'
 CHUNK = 1 << 20
+# Windows refuses to rename a folder while something holds a file inside it, which virus scanners do for a
+# moment with files just written (and an Explorer window can too): try again for up to ten seconds.
+RENAME_TRIES, RENAME_WAIT = 20, 0.5
 
 
 def listing(folder):
@@ -82,6 +86,16 @@ def remember(root):
         winreg.SetValueEx(key, 'DataLocation', 0, winreg.REG_SZ, str(root))
 
 
+def rename(source, destination):
+    for attempt in range(RENAME_TRIES):
+        try:
+            return source.rename(destination)
+        except OSError:
+            if attempt == RENAME_TRIES - 1:
+                raise
+            time.sleep(RENAME_WAIT)
+
+
 def free_name(path):
     candidate, number = path, 2
     while candidate.exists():
@@ -107,7 +121,7 @@ def relocate(source, root, keep=False, progress=lambda done, work: None):
         total = copy_checked(source, partial, progress)
         if target.exists():
             target.rmdir()
-        partial.rename(target)
+        rename(partial, target)
         if keep:
             remember(root)
     except BaseException:
@@ -122,7 +136,7 @@ def relocate(source, root, keep=False, progress=lambda done, work: None):
     # The app now uses the copy. The old folder gets a name that says what it is, so nothing opens it by mistake.
     old = free_name(source.parent / OLD_COPY)
     try:
-        source.rename(old)
+        rename(source, old)
     except OSError:
         old = source
         try:

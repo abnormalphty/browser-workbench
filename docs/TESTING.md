@@ -35,7 +35,7 @@ v0.6.1 准备流程回归：76项自动检查通过，包含模拟 Docker 未启
 
 ## v0.7 Mac 应用
 
-- 基础测试：`.venv/bin/python -m unittest discover -s tests`（187 项，含 `tests/test_windows.py` 与 `tests/test_docker_setup.py`（在任何电脑上按 Windows 分支运行；后者用本机的测试下载服务验证断点续传、签名不符时删除、需要开启 WSL 或重启时停下等待）、`tests/test_desktop.py`、`tests/test_migrate.py`、`tests/test_storage.py`（存储位置、移动数据的检查与核对）；在 Windows 上运行时跳过只检查 Mac 路径的 Docker 查找测试和旧版数据导入测试）。
+- 基础测试：`.venv/bin/python -m unittest discover -s tests`（188 项，含 `tests/test_windows.py` 与 `tests/test_docker_setup.py`（在任何电脑上按 Windows 分支运行；后者用本机的测试下载服务验证断点续传、签名不符时删除、需要开启 WSL 或重启时停下等待）、`tests/test_desktop.py`、`tests/test_migrate.py`、`tests/test_storage.py`（存储位置、移动数据的检查与核对）；在 Windows 上运行时跳过只检查 Mac 路径的 Docker 查找测试和旧版数据导入测试）。
 - 出口自动检测：单元测试覆盖哪些线路会被自动检测、失败后的重试间隔、两个查询服务的回答解析和中文城市名；`tests/integration_runtime.py` 之外，另用真实浏览器镜像跑过一次连不上的线路（约 10 秒结束，记录失败并保留名称推测）。
 - 容器集成：`tests/integration_runtime.py`（7 项）与 `tests/integration_transfers.py`（5 项），需要已有与 `RUNTIME_VERSION` 同版本的 `local-browser-workbench` 镜像；设 `WORKBENCH_PROFILE_STORAGE=volume` 可按 Windows 的方式（登录数据放在 Docker 存储卷）再跑一遍。
 - 端到端：`tests/ui/run_app_smoke.sh "<路径>/Browser Workbench.app"`。用 `open -g` 在后台启动应用（不抢键盘），数据目录用临时文件夹（路径含空格），通过开发者变量 `BROWSER_WORKBENCH_UI_TEST` 在应用窗口内运行 `tests/ui/app_smoke.js`，并把截图写到运行目录。检查：原生桥接、标题栏那条带能拖动窗口（点击交给原生拖动层，带下方的按钮仍可点击，页面缩放后同样成立，双击按系统设置缩放；用模拟点击检查，不会真的移动窗口）、环境设置里显示线路的时区与当前是夏令时还是冬令时、自动连上 Docker 与（必要时）载入自带镜像、无 Docker 时的指引显示、Mac 剪贴板→远程网页→Mac 剪贴板、在画面上投放文件（模拟事件）、Firefox 下载经“下载到电脑”逐字节一致、退出时停止环境且应用与后台都退出。运行期间会临时占用 Mac 剪贴板，结束后恢复其中的文字。
