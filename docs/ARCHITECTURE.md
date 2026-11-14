@@ -15,7 +15,9 @@ FastAPI 面板由 Mac 应用的原生窗口（v0.7 起）或本机浏览器（�
 - `workbench/geography.py`：节点地区、出口检测、IANA 时区。
 - `workbench/accounts.py` / `runtime/account_info.py`：用户主动执行的有限账号提示核对。
 - `workbench/transfers.py`：受保护的文件传输。
-- `static/`：本机界面、世界地图与剪贴板桥接。
+- `workbench/terminal.py`：“终端”标签：`docker exec` 在环境里起一个小桥接程序（伪终端 + bash，以 browser 用户运行），页面经 WebSocket 收发；只接受工作台页面自己的连接。
+- `workbench/gateway.py` / `openai_compat.py`：模型网关：127.0.0.1 上单独的端口，用官方 SDK 把 Messages 请求原样转给 Anthropic，把 OpenAI 格式的请求换成 Messages；API 密钥、专属密钥、设置历史与用量存在 SQLite 的设置表里。
+- `static/`：本机界面（`app.js`，模型网关页在 `gateway.js`）、世界地图与剪贴板桥接；`static/vendor/xterm/` 是原样附带的 xterm.js。
 - `runtime/`：容器构建与桌面进程，不使用浏览器调试连接。
 
 本机面板、Docker 浏览器环境、Claude 云端代码执行环境是三个不同位置。云端回复中的 `/home/claude/...` 不是本机路径；通过网页下载后才进入环境的共享下载目录。

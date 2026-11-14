@@ -8,11 +8,14 @@ Usage: check_bundle.py PATH.app
 import fnmatch
 import getpass
 from pathlib import Path
+import re
 import sys
 
 FORBIDDEN_NAMES = ('*.sqlite3', '*.sqlite', '*.sqlite3-*', 'launch.json', 'proxy.yaml', 'server.log', 'build.log',
                    '.workbench.lock', 'cookies.sqlite', 'places.sqlite', 'logins.json', 'key4.db', '.env')
 FORBIDDEN_DIRS = ('data', 'environments', 'verification-data', '.venv', '.git', 'transfer', 'firefox-standard')
+# An Anthropic key (API, subscription or admin) or a key the 模型网关 gave a program.
+KEYS = re.compile(rb'sk-ant-(?:api|oat|admin)\d\d-[A-Za-z0-9_-]{40,}|bwk-[A-Za-z0-9_-]{40}')
 
 
 def main(bundle):
@@ -22,7 +25,9 @@ def main(bundle):
     problems = []
     for path in bundle.rglob('*'):
         relative = path.relative_to(bundle)
-        if path.is_dir() and path.name in FORBIDDEN_DIRS:
+        # A Python package of that name (anthropic/…/environments) is code, not the workbench's data folders.
+        package = 'site-packages' in relative.parts and (path / '__init__.py').is_file()
+        if path.is_dir() and path.name in FORBIDDEN_DIRS and not package:
             problems.append(f'directory not allowed in bundle: {relative}')
         if not path.is_file() or path.is_symlink():
             continue
@@ -35,6 +40,8 @@ def main(bundle):
             problems.append(f'contains a local home path: {relative}')
         if b'PRIVATE KEY-----' in data:
             problems.append(f'contains a private key: {relative}')
+        if KEYS.search(data):
+            problems.append(f'contains an API key: {relative}')
     for problem in problems:
         print(problem)
     print(f'privacy check: {"FAILED" if problems else "passed"} ({bundle.name})')

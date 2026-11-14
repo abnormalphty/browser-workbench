@@ -46,6 +46,15 @@ document.addEventListener('keydown',event=>{
     try{sendControlKey('a');}catch{}
   }
 },true);
+// In full screen Esc returns to the workbench (app.js) instead of reaching the remote desktop.
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Escape')return;
+  let full=false;
+  try{const page=parent.document;full=!!(page.fullscreenElement||page.webkitFullscreenElement||page.querySelector('.frame-only'));}catch{}
+  if(!full)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  parent.postMessage({type:'workbench-exit-fullscreen'},origin);
+},true);
 window.addEventListener('message',event=>{
   if(event.origin!==origin||event.source!==parent||event.data?.type!=='workbench-copy-request')return;
   const id=event.data.id;

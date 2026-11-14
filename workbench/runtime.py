@@ -1,4 +1,5 @@
-"""Own only containers carrying this workbench's labels; never execute a shell."""
+"""Own only containers carrying this workbench's labels; never execute a shell (the 终端 tab opens one inside
+an environment only when the user asks for it, see terminal.py)."""
 import json
 import os
 import secrets

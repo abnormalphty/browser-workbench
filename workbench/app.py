@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 import httpx
 
 from . import __version__
+from .gateway import Gateway
 from .runtime import ROOT, Runtime
 from . import storage
 from .store import Store
@@ -27,9 +29,20 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
     control_token = control_token or os.environ.get('WORKBENCH_CONTROL_TOKEN') or None
     store = Store(data_dir)
     runtime = Runtime(store)
+    gateway = Gateway(store)
     token = secrets.token_urlsafe(32)
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.store, app.state.runtime = store, runtime
+
+    @asynccontextmanager
+    async def lifespan(app):
+        # The model gateway has a server of its own on a port the user chose: up while the workbench runs.
+        await asyncio.to_thread(gateway.apply)
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(gateway.stop)
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app.state.store, app.state.runtime, app.state.gateway = store, runtime, gateway
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost'])
 
     @app.middleware('http')
@@ -360,10 +373,92 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
             open_folder(files.path/kind)
         return {'ok':True}
 
+    def from_workbench(websocket):
+        """WebSockets do not pass the HTTP middleware: they must come from the workbench page itself."""
+        expected = 'http://' + websocket.headers.get('host', '')
+        return websocket.headers.get('origin') == expected and secrets.compare_digest(websocket.cookies.get('workbench_session',''), token)
+
+    # ---------- 模型网关 (gateway.py): settings for the local server; API keys never come back in full ----------
+
+    async def gateway_state(notice=None):
+        return {**await asyncio.to_thread(gateway.state), 'notice': notice}
+
+    @app.get('/api/gateway')
+    async def gateway_get():
+        return await gateway_state()
+
+    @app.patch('/api/gateway/settings')
+    async def gateway_settings(request: Request):
+        await asyncio.to_thread(gateway.settings, await body(request))
+        return await gateway_state()
+
+    @app.post('/api/gateway/keys')
+    async def gateway_add_key(request: Request):
+        data = await body(request)
+        return await gateway_state(await asyncio.to_thread(gateway.add_key, text(data, 'name'), text(data, 'secret')))
+
+    @app.patch('/api/gateway/keys/{key_id}')
+    async def gateway_update_key(key_id: str, request: Request):
+        await asyncio.to_thread(gateway.update_key, key_id, await body(request))
+        return await gateway_state()
+
+    @app.delete('/api/gateway/keys/{key_id}')
+    async def gateway_delete_key(key_id: str):
+        await asyncio.to_thread(gateway.delete_key, key_id)
+        return await gateway_state()
+
+    @app.post('/api/gateway/keys/{key_id}/check')
+    async def gateway_check_key(key_id: str):
+        models = await asyncio.to_thread(gateway.check_key, key_id)
+        return await gateway_state(f'API 密钥可以使用，读到 {len(models)} 个模型。')
+
+    @app.post('/api/gateway/models/refresh')
+    async def gateway_refresh_models():
+        models = await asyncio.to_thread(gateway.refresh_models)
+        return await gateway_state(f'模型列表已更新，共 {len(models)} 个。')
+
+    @app.post('/api/gateway/clients')
+    async def gateway_add_client(request: Request):
+        client_id = await asyncio.to_thread(gateway.save_client, None, await body(request))
+        return {**await gateway_state(), 'client_id': client_id}
+
+    @app.patch('/api/gateway/clients/{client_id}')
+    async def gateway_update_client(client_id: str, request: Request):
+        await asyncio.to_thread(gateway.save_client, client_id, await body(request))
+        return await gateway_state()
+
+    @app.delete('/api/gateway/clients/{client_id}')
+    async def gateway_delete_client(client_id: str):
+        await asyncio.to_thread(gateway.delete_client, client_id)
+        return await gateway_state()
+
+    @app.post('/api/gateway/clients/{client_id}/token')
+    async def gateway_client_token(client_id: str):
+        # Only for the page's 复制 button: the key goes to the clipboard, it is never shown.
+        return {'token': await asyncio.to_thread(gateway.client_token, client_id)}
+
+    @app.post('/api/gateway/clients/{client_id}/rotate')
+    async def gateway_rotate_client(client_id: str):
+        new_token = await asyncio.to_thread(gateway.rotate_client, client_id)
+        return {**await gateway_state(), 'token': new_token}
+
+    @app.post('/api/gateway/history/{index}/restore')
+    async def gateway_restore(index: int):
+        missing = await asyncio.to_thread(gateway.restore, index)
+        notice = f'已恢复。{"、".join(missing)} 原来用的 API 密钥已删除，现在改用默认 API 密钥。' if missing else '已恢复到这一步的设置。'
+        return await gateway_state(notice)
+
+    @app.websocket('/view/{env_id}/terminal')
+    async def terminal(websocket: WebSocket, env_id: str, rows: int = 24, cols: int = 80):
+        if not from_workbench(websocket):
+            await websocket.close(code=1008)
+            return
+        from .terminal import serve
+        await serve(websocket, runtime, env_id, rows, cols)
+
     @app.websocket('/view/{env_id}/websockify')
     async def bridge(websocket: WebSocket, env_id: str):
-        expected = 'http://' + websocket.headers.get('host', '')
-        if websocket.headers.get('origin') != expected or not secrets.compare_digest(websocket.cookies.get('workbench_session',''),token):
+        if not from_workbench(websocket):
             await websocket.close(code=1008)
             return
         tasks = []

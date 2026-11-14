@@ -58,6 +58,39 @@ try {
     $('storageContent').textContent.slice(0, 300));
   await native.call('test.snapshot', {name: '03-storage'});
   hideDialog('storageDialog'); setPage('environments');
+
+  // 全屏: GitHub's machines cannot run an environment, but the view and its button work without one. The click
+  // comes through the DevTools input (a real user gesture); the window then fills the screen and comes back.
+  $('browserView').hidden = false;
+  await sleep(500);
+  const button = $('fullscreenBrowser').getBoundingClientRect();
+  await native.call('test.click', {x: button.left + button.width / 2, y: button.top + button.height / 2});
+  const full = await until(async () => fullscreenElement() && (await native.call('test.window')).borderless, 10000);
+  const win = await native.call('test.window');
+  step('全屏 fills the screen with the environment picture', full && win.bounds.join() === win.screen.join(), JSON.stringify(win));
+  await native.call('test.snapshot', {name: '04-fullscreen'});
+  await leaveFullscreen();
+  const back = await until(async () => !fullscreenElement() && !(await native.call('test.window')).borderless, 10000);
+  step('leaving 全屏 restores the window', back, JSON.stringify(await native.call('test.window')));
+  $('browserView').hidden = true;
+
+  // 模型网关: its own server in the packaged backend, on 127.0.0.1.
+  setPage('gateway');
+  const page = await until(() => typeof gateway !== 'undefined' && gateway && $('gatewayAddress').textContent === gateway.address && gateway, 10000);
+  step('模型网关 page loads', page, JSON.stringify(page && {address: page.address}));
+  const on = await api('gateway/settings', {method: 'PATCH', body: {enabled: true}});
+  step('模型网关 server starts in the packaged backend', on.running && !on.error, JSON.stringify({running: on.running, error: on.error}));
+  await loadGateway(); await sleep(400);
+  await native.call('test.snapshot', {name: '05-gateway'});
+  // The SDK inside the packaged Python: a key checked through a proxy where nothing listens, so nothing leaves
+  // this computer and the key is kept as not yet verified.
+  await api('gateway/settings', {method: 'PATCH', body: {proxy: '127.0.0.1:9'}});
+  const added = await api('gateway/keys', {method: 'POST', body: {name: '自测', secret: 'sk-ant-api03-' + 'x'.repeat(40)}});
+  step('模型网关: the bundled Anthropic SDK checks a key (here through a proxy that refuses)', added.keys[0]?.status === 'unreachable' &&
+    added.notice?.includes('暂时没能验证'), JSON.stringify({notice: added.notice, keys: added.keys}));
+  const off = await api('gateway/settings', {method: 'PATCH', body: {enabled: false}});
+  step('模型网关 stops when switched off', !off.running, JSON.stringify({running: off.running}));
+  setPage('environments');
   if (expected?.moveTo) {
     const target = await api('storage/check', {method: 'POST', body: {path: expected.moveTo}});
     step('the new place is checked before moving', same(target.data_dir, expected.moveTo + '\\Data'), JSON.stringify(target));

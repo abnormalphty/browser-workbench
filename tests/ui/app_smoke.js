@@ -21,7 +21,7 @@ try {
   step('page runs in app mode with native bridge', native && document.documentElement.classList.contains('native-app'));
   // The page polls on its own; refresh() returns early while that call is in flight.
   await until(async () => { await refresh(); return state.app; }, 30000, 500);
-  step('backend reports app version', state.app?.version === '0.8.1' && state.app?.mode === 'desktop', JSON.stringify(state.app));
+  step('backend reports app version', state.app?.version === '1.0.0' && state.app?.mode === 'desktop', JSON.stringify(state.app));
   await snap('01-start');
   // Route time zones: the environment dialog says which zone a route brings, and whether DST applies now.
   const tzNode = {id: 'f'.repeat(32), name: '时区自测 洛杉矶', type: 'http', geo: {label: '洛杉矶', timezone: 'America/Los_Angeles', standard: 'UTC−08:00', daylight: 'UTC−07:00', now: 'UTC−07:00', dst_now: true, source: 'exit'}};
@@ -166,6 +166,63 @@ try {
   await sleep(500);
   await snap('08-download-toast');
   hideDialog('filesDialog');
+
+  // The switch strip above the picture: every environment, the one on screen marked.
+  renderStrip();
+  const current = $('stripItems').querySelector('.strip-item.current');
+  step('switch strip lists the environment and marks it current', current?.dataset.switch === env.id && current.textContent.includes('UI 自测环境') &&
+    $('stripSummary').textContent === `1 / ${state.environments.length} 已启动`, $('stripSummary').textContent + ' · ' + $('stripItems').textContent);
+
+  // 终端: a command line in the environment, as the browser's user, through the bridge in the container.
+  setViewTab('terminal');
+  const shell = await until(() => { const t = terminals.get(env.id); return t?.socket?.readyState === WebSocket.OPEN && t; }, 30000, 500);
+  const screenText = t => { const b = t.term.buffer.active, lines = []; for (let i = 0; i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) || ''); return lines.join('\n'); };
+  let answer = null;
+  if (shell) {
+    await sleep(1500);
+    sendTerminal(shell, {type: 'input', data: 'echo "$((6*7))-$(id -un)-$LANG"; stty size\r'});
+    answer = await until(() => { const text = screenText(shell); return text.includes('42-browser-C.UTF-8') && text; }, 15000, 500);
+  }
+  step('终端 runs commands in the environment as its browser user', answer, (answer || (shell ? screenText(shell) : 'no connection')).slice(-300));
+  await snap('09-terminal');
+  setViewTab('browser');
+
+  // 全屏 needs a real click: the harness posts one to the button. WKWebView then shows the element full screen.
+  // The page only takes clicks in the key window, so the app comes forward first (key tells whether it could).
+  if (!onWindows) {
+    const press = await band({click: mid(rect('#fullscreenBrowser')), activate: true});
+    const full = await until(() => fullscreenElement() === $('browserFrameWrap'), 10000, 300);
+    step('全屏: a click shows the picture full screen (WKWebView element full screen)', full,
+      JSON.stringify({element: fullscreenElement()?.id || null, frameOnly: $('browserView').classList.contains('frame-only'), key: press.key}));
+    await sleep(1500);
+    await snap('10-fullscreen');
+    await leaveFullscreen();
+    const back = await until(() => !fullscreenElement() && !$('browserView').classList.contains('frame-only'), 10000, 300);
+    // WebKit puts the web view back into the window with an animation: until then nothing in it takes clicks.
+    // It must land back inside the window's content view, or nothing in the window gets clicks any more.
+    let after = null;
+    const settled = await until(async () => (after = await band({points: [mid(rect('.browser-identity'))]})).hits.join() === 'drag', 15000, 500);
+    step('leaving 全屏 puts the page back in the window: title band drags, traffic lights click', back && settled &&
+      after.closeButton === 'button' && after.inPlace === true, JSON.stringify(after));
+  }
+
+  // 模型网关: its own server in the packaged backend, on 127.0.0.1 (no API key needed to start it).
+  $('exitBrowser').click(); await sleep(500);
+  setPage('gateway');
+  const page = await until(() => typeof gateway !== 'undefined' && gateway && $('gatewayAddress').textContent === gateway.address && gateway, 10000, 300);
+  step('模型网关 page loads', page, JSON.stringify(page && {address: page.address, running: page.running}));
+  const on = await api('gateway/settings', {method: 'PATCH', body: {enabled: true}});
+  step('模型网关 server starts in the packaged backend', on.running && !on.error, JSON.stringify({running: on.running, error: on.error}));
+  await loadGateway(); await sleep(400); await snap('11-gateway');
+  // The SDK inside the packaged Python: a key checked through a proxy where nothing listens, so nothing leaves
+  // this computer and the key is kept as not yet verified.
+  await api('gateway/settings', {method: 'PATCH', body: {proxy: '127.0.0.1:9'}});
+  const added = await api('gateway/keys', {method: 'POST', body: {name: '自测', secret: 'sk-ant-api03-' + 'x'.repeat(40)}});
+  step('模型网关: the bundled Anthropic SDK checks a key (here through a proxy that refuses)', added.keys[0]?.status === 'unreachable' &&
+    added.notice?.includes('暂时没能验证'), JSON.stringify({notice: added.notice, keys: added.keys}));
+  const off = await api('gateway/settings', {method: 'PATCH', body: {enabled: false}});
+  step('模型网关 stops when switched off', !off.running, JSON.stringify({running: off.running}));
+  setPage('environments');
 } catch (error) {
   step('test aborted', false, error?.message || error);
 } finally {

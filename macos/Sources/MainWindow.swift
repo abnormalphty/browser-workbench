@@ -32,6 +32,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         configuration.userContentController = content
         configuration.websiteDataStore = .default()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // The page's 全屏 shows an environment's picture on the whole screen (app.js).
+        configuration.preferences.isElementFullscreenEnabled = true
         webView = WKWebView(frame: .zero, configuration: configuration)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
@@ -53,13 +55,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         window.minSize = NSSize(width: 960, height: 620)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.contentView = webView
+        // The web view lies in a view of its own, not as the content view itself: for 全屏 WebKit takes it out of
+        // its superview into a full-screen window, and afterwards puts it back as a plain subview, which would
+        // leave the window with no content view. The drag band stays here, above the web view, so the
+        // full-screen picture has none.
+        let container = NSView()
+        window.contentView = container
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.width, .height]
+        container.addSubview(webView)
         titleBand.translatesAutoresizingMaskIntoConstraints = false
-        webView.addSubview(titleBand)
+        container.addSubview(titleBand)
         titleBandHeight = titleBand.heightAnchor.constraint(equalToConstant: Self.barHeight)
-        NSLayoutConstraint.activate([titleBand.topAnchor.constraint(equalTo: webView.topAnchor),
-                                     titleBand.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
-                                     titleBand.trailingAnchor.constraint(equalTo: webView.trailingAnchor), titleBandHeight])
+        NSLayoutConstraint.activate([titleBand.topAnchor.constraint(equalTo: container.topAnchor),
+                                     titleBand.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                                     titleBand.trailingAnchor.constraint(equalTo: container.trailingAnchor), titleBandHeight])
+        window.initialFirstResponder = webView
         if !window.setFrameUsingName("MainWindow") { window.center() }
         window.setFrameAutosaveName("MainWindow")
         super.init(window: window)
@@ -227,23 +238,36 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
             window.layoutIfNeeded()
             let points = (body["points"] as? [[Double]] ?? []).filter { $0.count == 2 }
             var reply: [String: Any] = ["band": titleBandHeight.constant, "doubleClick": TitleBarDragView.doubleClickAction,
-                                        "hits": points.map { hitKind(at: windowPoint(page: $0[0], $0[1])) }]
+                                        "hits": points.map { hitKind(at: windowPoint(page: $0[0], $0[1])) },
+                                        "inPlace": window.contentView != nil && webView.superview === window.contentView]
             if let close = window.standardWindowButton(.closeButton) {
                 reply["closeButton"] = hitKind(at: close.convert(NSPoint(x: close.bounds.midX, y: close.bounds.midY), to: nil))
             }
             guard let click = body["click"] as? [Double], click.count == 2 else { return replyHandler(reply, nil) }
-            let location = windowPoint(page: click[0], click[1]), clicks = body["count"] as? Int ?? 1, before = titleBand.drags
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                if let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                                  windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks,
-                                                  pressure: type == .leftMouseDown ? 1 : 0) {
-                    NSApp.postEvent(event, atStart: false)
+            let post = { [self] in
+                let location = windowPoint(page: click[0], click[1]), clicks = body["count"] as? Int ?? 1, before = titleBand.drags
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks,
+                                                      pressure: type == .leftMouseDown ? 1 : 0) {
+                        NSApp.postEvent(event, atStart: false)
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    reply["drags"] = self.titleBand.drags - before
+                    reply["zoomed"] = window.isZoomed
+                    replyHandler(reply, nil)
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                reply["drags"] = self.titleBand.drags - before
-                reply["zoomed"] = window.isZoomed
-                replyHandler(reply, nil)
+            // The page takes clicks only in the key window (the first click on a window in the background just brings
+            // it forward), and the test runs the app in the background: for a page control it comes forward first,
+            // as when someone clicks.
+            guard body["activate"] as? Bool == true else { return post() }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                reply["key"] = window.isKeyWindow
+                post()
             }
         case "test.quit":
             replyHandler(["ok": true], nil)

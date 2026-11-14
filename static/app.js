@@ -44,6 +44,12 @@ const paths = {
   reconnect:'<path d="M3 12a9 9 0 0 1 15.5-6.3L21 8m0-5v5h-5m5 4a9 9 0 0 1-15.5 6.3L3 16m0 5v-5h5"/>',
   sliders:'<path d="M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+  expand:'<path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5"/>',
+  collapse:'<path d="M9 4v5H4m16 0h-5V4m0 16v-5h5M4 15h5v5"/>',
+  terminal:'<rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="m7 9 3 3-3 3m5 0h5"/>',
+  key:'<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3m-5.5-.5 2.5 2.5"/>',
+  history:'<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5m0-5v5h5M12 7.5V12l3 2"/>',
+  plug:'<path d="M9 2.5v5m6-5v5M6 7.5h12V11a6 6 0 0 1-12 0Zm6 9.5v4.5"/>',
 };
 const icon = name => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.grid}</svg></span>`;
 function paintIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{e.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${paths[e.dataset.icon]||paths.grid}</svg>`;e.removeAttribute('data-icon');});}
@@ -58,9 +64,11 @@ async function api(path, options={}){
   if(!response.ok) throw new Error(data.error||data.detail||'操作没有完成，请重试。');
   return data;
 }
-// An open modal dialog sits in the top layer above any z-index, so the toast joins it there.
-function toast(message,error=false,action=null){const t=$('toast'),host=[...document.querySelectorAll('dialog[open]')].pop()||document.body;if(t.parentElement!==host)host.append(t);t.textContent=message;if(action){const b=document.createElement('button');b.className='toast-action';b.textContent=action.label;b.onclick=()=>{t.hidden=true;action.run();};t.append(b);}t.classList.toggle('error',error);t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,action?9000:5500);}
-function setPage(page){currentPage=page;$('environmentPage').hidden=page!=='environments';$('nodesPage').hidden=page!=='nodes';$('informationPage').hidden=page!=='information';$('breadcrumbCurrent').textContent=page==='nodes'?'订阅与线路':page==='information'?'账号与资源':'浏览器环境';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===page));}
+// An open modal dialog sits in the top layer above any z-index, so the toast joins it there; in full
+// screen only the full-screen element shows.
+const fullscreenElement=()=>document.fullscreenElement||document.webkitFullscreenElement||null;
+function toast(message,error=false,action=null){const t=$('toast'),host=[...document.querySelectorAll('dialog[open]')].pop()||fullscreenElement()||document.body;if(t.parentElement!==host)host.append(t);t.textContent=message;if(action){const b=document.createElement('button');b.className='toast-action';b.textContent=action.label;b.onclick=()=>{t.hidden=true;action.run();};t.append(b);}t.classList.toggle('error',error);t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,action?9000:5500);}
+function setPage(page){currentPage=page;$('environmentPage').hidden=page!=='environments';$('nodesPage').hidden=page!=='nodes';$('informationPage').hidden=page!=='information';$('gatewayPage').hidden=page!=='gateway';$('breadcrumbCurrent').textContent=page==='nodes'?'订阅与线路':page==='information'?'账号与资源':page==='gateway'?'模型网关':'浏览器环境';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===page));if(page==='gateway'&&window.loadGateway)loadGateway().catch(e=>toast(e.message,true));}
 function showDialog(id){if(!$(id).open)$(id).showModal();}
 function hideDialog(id){$(id).close();}
 // Windows can install Docker Desktop from here (docker_setup.py): steps only the user can take come as
@@ -194,7 +202,7 @@ function renderNodes(){
 async function refresh(){
   if(refreshing)return;refreshing=true;
   try{
-    state=await api('state');renderEnvironments();renderNodes();updateRuntime();renderInformation();
+    state=await api('state');renderEnvironments();renderNodes();updateRuntime();renderInformation();renderStrip();forgetTerminals();
     if(!preparationAttempted&&state.runtime.docker_installed&&!state.runtime.image_ready&&state.runtime.build_state==='idle'){preparationAttempted=true;await api('runtime/prepare',{method:'POST'});}
     // Docker installed or finished its first start after preparation gave up: continue by itself.
     const was=previousRuntime,now=state.runtime;previousRuntime=now;
@@ -231,6 +239,8 @@ async function openBrowser(id){
   const env=state.environments.find(e=>e.id===id);if(!env)return;
   $('browserHint').textContent=env.engine==='firefox'?'标准模式：跳转后的地址请以画面内地址栏为准':'返回工作台不会停止环境';
   const view=await api(`environments/${id}/view`);activeId=id;$('browserName').textContent=env.name;$('browserMode').textContent=env.runtime.test_mode?'无代理测试':'运行中';$('browserFrame').src=view.url;$('browserAddress').value=env.runtime.url?.startsWith('http')?env.runtime.url:'';$('browserView').hidden=false;document.body.style.overflow='hidden';
+  renderStrip();$('stripItems').querySelector('.current')?.scrollIntoView({block:'nearest',inline:'nearest'});
+  if(viewTab==='terminal')openTerminal(id).catch(e=>toast(e.message,true));
 }
 function confirmDelete(id){
   const env=state.environments.find(e=>e.id===id);$('confirmTitle').textContent='删除这个环境？';$('confirmAction').textContent='确认删除';$('confirmAction').className='button danger';$('confirmMessage').textContent=`“${env.name}”的登录记录、浏览器数据和已下载文件会被清除。这个操作无法撤回。`;
@@ -289,12 +299,162 @@ $('runtimePrimary').onclick=async()=>{
     if(!r.docker_installed){openExternal(r.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。安装并打开后，工作台会自动继续。');return;}if(r.docker_ready&&r.image_ready){hideDialog('runtimeDialog');return;}preparationAttempted=true;await api('runtime/prepare',{method:'POST'});toast('已开始一键准备，就绪后会自动继续。');await refresh();}catch(e){toast(e.message,true);}
 };
 $('manualDocker').onclick=()=>{openExternal(state.runtime.docker_download_url||'https://www.docker.com/products/docker-desktop/');toast('正在用浏览器下载 Docker Desktop。按默认选项装好后，工作台会自动继续。');};
-$('exitBrowser').onclick=()=>{$('browserView').hidden=true;$('browserFrame').src='about:blank';activeId=null;document.body.style.overflow='';refresh();};
+$('exitBrowser').onclick=()=>{leaveFullscreen();setViewTab('browser');$('browserView').hidden=true;$('browserFrame').src='about:blank';activeId=null;document.body.style.overflow='';refresh();};
 $('reconnectBrowser').onclick=async()=>{try{await openBrowser(activeId);}catch(e){toast(e.message,true);}};
 $('addressForm').onsubmit=async e=>{e.preventDefault();try{await browserAction('navigate',{url:$('browserAddress').value});}catch(error){toast(error.message,true);}};
 $('toggleTextInput').onclick=()=>$('browserTextPanel').hidden=!$('browserTextPanel').hidden;
 $('sendBrowserText').onclick=async()=>{try{$('sendBrowserText').disabled=true;await browserAction('paste',{text:$('browserText').value});$('browserText').value='';toast('文字已发送到浏览器输入框。');}catch(e){toast(e.message,true);}finally{$('sendBrowserText').disabled=false;}};
 $('copySelection').onclick=async()=>{try{const r=await browserAction('copy');if(!r.text){toast('请先在远程网页中选中文字。');return;}await navigator.clipboard.writeText(r.text);toast('选中文字已复制。');}catch(e){toast(e.message,true);}};
+// The strip above an open environment lists every environment: one click switches to a started one,
+// wakes a paused one or starts a stopped one (it opens by itself once ready, like from the list).
+const statusNames={running:'运行中',starting:'启动中',stopped:'已停止',error:'需要重试',paused:'低功耗'};
+const switchHints={running:'点击切换到这里',paused:'点击唤醒并切换',starting:'启动后自动切换',stopped:'点击启动，准备好后自动切换',error:'点击重新启动'};
+let stripHtml='';
+function renderStrip(){
+  if($('browserView').hidden)return;
+  const all=state.environments,status=e=>e.runtime?.status||'stopped';
+  $('stripSummary').textContent=`${all.filter(e=>['running','starting','paused'].includes(status(e))).length} / ${all.length} 已启动`;
+  const html=all.map(e=>{const s=status(e),current=e.id===activeId;
+    return `<button class="strip-item${current?' current':''}" data-switch="${e.id}"${current?' aria-current="page"':''} title="${esc(e.name)} · ${statusNames[s]||'未知状态'}${current?' · 正在查看':' · '+(switchHints[s]||'')}"><span class="strip-dot ${esc(s)}"></span><span class="strip-name">${esc(e.name)}</span></button>`;}).join('');
+  // Redrawn only when something changed, so a click is never lost to the 6-second refresh.
+  if(html===stripHtml)return;
+  const items=$('stripItems'),scroll=items.scrollLeft;
+  items.innerHTML=stripHtml=html;items.scrollLeft=scroll;
+}
+async function switchEnvironment(id){
+  const env=state.environments.find(e=>e.id===id);if(!env||id===activeId)return;
+  const s=env.runtime.status;
+  if(s==='running'){await openBrowser(id);return;}
+  if(s==='paused'){await api(`environments/${id}/resume`,{method:'POST'});pendingOpen=id;await refresh();return;}
+  if(s==='starting'){pendingOpen=id;toast(`“${env.name}”正在启动，准备好后会自动切换过去。`);return;}
+  if(!env.node_id){editEnvironment(id);$('autoOpenOption').hidden=false;$('autoOpen').checked=true;toast('请绑定线路，或勾选无代理测试模式后打开。');return;}
+  await startEnvironment(id);
+}
+$('stripItems').addEventListener('click',async event=>{
+  const item=event.target.closest('[data-switch]');if(!item)return;
+  item.disabled=true;
+  try{await switchEnvironment(item.dataset.switch);}catch(e){toast(e.message,true);}finally{item.disabled=false;}
+});
+// A mouse wheel scrolls the strip sideways when it holds more environments than fit.
+$('stripItems').addEventListener('wheel',event=>{const items=$('stripItems');if(Math.abs(event.deltaY)>Math.abs(event.deltaX)&&items.scrollWidth>items.clientWidth){items.scrollLeft+=event.deltaY;event.preventDefault();}},{passive:false});
+
+// Full screen shows only the environment's picture. The Mac and Windows windows fill the screen for it
+// (MainWindow.swift, MainForm.cs); where the Fullscreen API is missing the picture fills the window instead.
+// Esc ends it, also while the remote desktop has the keyboard (clipboard-bridge.js passes it on).
+let fullscreenHintTimer=null, realFullscreen=false;
+const frameOnly=()=>$('browserView').classList.contains('frame-only');
+function showFullscreenHint(){$('fullscreenHint').hidden=false;clearTimeout(fullscreenHintTimer);fullscreenHintTimer=setTimeout(()=>$('fullscreenHint').hidden=true,2600);}
+async function enterFullscreen(){
+  const wrap=$('browserFrameWrap');
+  let request;
+  try{request=wrap.requestFullscreen?wrap.requestFullscreen():wrap.webkitRequestFullscreen?(wrap.webkitRequestFullscreen(),Promise.resolve()):Promise.reject(new Error('unsupported'));}
+  catch(error){request=Promise.reject(error);}
+  // Some embedded browsers never answer the request: after a moment the picture fills the window instead.
+  const granted=await Promise.race([request.then(()=>true,()=>false),new Promise(resolve=>setTimeout(()=>resolve(false),1500))]);
+  if(!granted&&!fullscreenElement()){$('browserView').classList.add('frame-only');$('exitFullscreen').hidden=false;fullscreenChanged();}
+  showFullscreenHint();$('browserFrame').focus();
+}
+async function leaveFullscreen(){
+  $('browserView').classList.remove('frame-only');$('exitFullscreen').hidden=true;
+  if(fullscreenElement()){try{await (document.exitFullscreen?document.exitFullscreen():document.webkitExitFullscreen());}catch{}}
+  fullscreenChanged();
+}
+function fullscreenChanged(){
+  const real=!!fullscreenElement();
+  // Real full screen replaces the in-window version, and ending it ends both.
+  if(real||realFullscreen){$('browserView').classList.remove('frame-only');$('exitFullscreen').hidden=true;}
+  realFullscreen=real;
+  const on=real||frameOnly();
+  $('fullscreenBrowser').classList.toggle('active',on);$('fullscreenBrowser').title=on?'退出全屏（Esc）':'全屏显示环境画面，按 Esc 退出';
+  if(!on)$('fullscreenHint').hidden=true;
+}
+document.addEventListener('fullscreenchange',fullscreenChanged);document.addEventListener('webkitfullscreenchange',fullscreenChanged);
+$('fullscreenBrowser').onclick=()=>fullscreenElement()||frameOnly()?leaveFullscreen():enterFullscreen();
+$('exitFullscreen').onclick=leaveFullscreen;
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&frameOnly())leaveFullscreen();});
+window.addEventListener('message',event=>{
+  if(event.origin===location.origin&&event.source===$('browserFrame').contentWindow&&event.data?.type==='workbench-exit-fullscreen')leaveFullscreen();
+});
+
+// 终端: a command line inside the open environment (workbench/terminal.py), drawn by xterm.js
+// (static/vendor/xterm, loaded the first time it is needed). Each environment keeps its own while you switch
+// tabs or environments; it ends when the environment stops, and Enter then opens a new one.
+const terminals=new Map();
+let viewTab='browser', xterm=null;
+$('terminalNote').textContent='环境里的命令行 · '+(onWindows?'选中文字后按 Ctrl+C 复制，Ctrl+V 粘贴':'⌘C 复制选中的文字，⌘V 粘贴');
+async function loadXterm(){
+  if(!xterm){
+    const css=document.createElement('link');css.rel='stylesheet';css.href='/static/vendor/xterm/xterm.css';document.head.append(css);
+    const [{Terminal},{FitAddon}]=await Promise.all([import('/static/vendor/xterm/xterm.mjs'),import('/static/vendor/xterm/addon-fit.mjs')]);
+    xterm={Terminal,FitAddon};
+  }
+  return xterm;
+}
+function copyText(text){return native?native.call('clipboard.writeText',{text}):navigator.clipboard.writeText(text);}
+async function openTerminal(envId){
+  if(!terminals.has(envId)){
+    const {Terminal,FitAddon}=await loadXterm();
+    if(!terminals.has(envId)){
+      const element=document.createElement('div');element.className='terminal-pane';$('terminalHost').append(element);
+      const term=new Terminal({cursorBlink:true,fontSize:13,scrollback:5000,
+        fontFamily:onWindows?'Consolas, "Microsoft YaHei UI", monospace':'"SF Mono", Menlo, "PingFang SC", monospace',
+        theme:{background:'#101312',foreground:'#e3e9e6',cursor:'#6fcca4',selectionBackground:'rgba(111, 204, 164, .35)'}});
+      const fit=new FitAddon();term.loadAddon(fit);term.open(element);
+      const t={envId,term,fit,element,socket:null,ended:false};terminals.set(envId,t);
+      term.onData(data=>{if(t.ended){if(data.includes('\r'))connectTerminal(t);return;}sendTerminal(t,{type:'input',data});});
+      term.onResize(({rows,cols})=>sendTerminal(t,{type:'resize',rows,cols}));
+      term.attachCustomKeyEventHandler(event=>terminalKey(t,event));
+      showTerminal(envId);connectTerminal(t);return;
+    }
+  }
+  showTerminal(envId);
+}
+function showTerminal(envId){
+  for(const t of terminals.values())t.element.hidden=t.envId!==envId;
+  const t=terminals.get(envId);
+  if(t&&viewTab==='terminal'&&activeId===envId)requestAnimationFrame(()=>{t.fit.fit();t.term.focus();});
+}
+function connectTerminal(t){
+  const env=state.environments.find(e=>e.id===t.envId);
+  t.ended=false;
+  t.term.writeln(`\x1b[2m“${env?.name||'环境'}”里的命令行，用户 browser。${env?.runtime?.test_mode?'无代理测试：网络直接连接，不经过线路。':'网络和浏览器一样经过这个环境的线路。'}\x1b[0m`);
+  t.term.writeln('\x1b[2m停止环境后只保留 /profile 里的文件；放进 /profile/transfer/downloads 的文件可以在“文件传输”里取回。\x1b[0m');
+  if(!t.element.hidden&&!$('terminalHost').hidden)t.fit.fit();
+  const socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/view/${t.envId}/terminal?rows=${t.term.rows}&cols=${t.term.cols}`);
+  socket.binaryType='arraybuffer';t.socket=socket;
+  socket.onmessage=event=>{
+    if(typeof event.data==='string'){try{const m=JSON.parse(event.data);if(m.type==='error')t.term.writeln(`\x1b[31m${m.message}\x1b[0m`);}catch{}return;}
+    t.term.write(new Uint8Array(event.data));
+  };
+  socket.onclose=()=>{if(t.socket!==socket)return;t.socket=null;t.ended=true;t.term.writeln('\r\n\x1b[2m终端已结束。按回车键重新打开。\x1b[0m');};
+}
+function sendTerminal(t,message){if(t.socket?.readyState===WebSocket.OPEN)t.socket.send(JSON.stringify(message));}
+// Windows: Ctrl+C copies a selection (without one it stops the running program) and Ctrl+V pastes, like in
+// other Windows programs. The Mac's ⌘C and ⌘V are the system's copy and paste already.
+function terminalKey(t,event){
+  if(event.type!=='keydown'||!onWindows||!event.ctrlKey||event.altKey||event.metaKey)return true;
+  const key=event.key.toLowerCase();
+  if(key==='c'&&t.term.hasSelection()){copyText(t.term.getSelection()).catch(()=>{});t.term.clearSelection();return false;}
+  return key!=='v';
+}
+// Terminals of deleted environments go away.
+function forgetTerminals(){
+  for(const [id,t] of terminals){
+    if(state.environments.some(e=>e.id===id))continue;
+    const socket=t.socket;t.socket=null;socket?.close();t.term.dispose();t.element.remove();terminals.delete(id);
+  }
+}
+function setViewTab(tab){
+  if(tab==='terminal'&&(fullscreenElement()||frameOnly()))leaveFullscreen();
+  viewTab=tab;
+  $('browserView').classList.toggle('terminal-mode',tab==='terminal');
+  $('tabBrowser').setAttribute('aria-selected',String(tab==='browser'));$('tabTerminal').setAttribute('aria-selected',String(tab==='terminal'));
+  $('terminalHost').hidden=$('terminalNote').hidden=tab!=='terminal';
+  if(tab==='terminal'&&activeId)openTerminal(activeId).catch(e=>toast(e.message,true));
+}
+document.querySelector('.view-tabs').addEventListener('click',event=>{const tab=event.target.closest('[data-view-tab]');if(tab)setViewTab(tab.dataset.viewTab);});
+new ResizeObserver(()=>{const t=terminals.get(activeId);if(viewTab==='terminal'&&t&&!t.element.hidden)t.fit.fit();}).observe($('terminalHost'));
+
 paintIcons();refresh();setInterval(refresh,6000);
 
 // Transfers are initiated only by an explicit paste, selection, or drop.

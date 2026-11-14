@@ -116,11 +116,39 @@ namespace BrowserWorkbench
         {
             try
             {
-                var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                var bounds = fullScreenFrom ?? (WindowState == FormWindowState.Normal ? Bounds : RestoreBounds);
+                var maximized = fullScreenFrom != null ? fullScreenWasMaximized : WindowState == FormWindowState.Maximized;
                 Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.WindowState));
-                File.WriteAllText(AppPaths.WindowState, $"{bounds.X},{bounds.Y},{bounds.Width},{bounds.Height},{(WindowState == FormWindowState.Maximized ? 1 : 0)}");
+                File.WriteAllText(AppPaths.WindowState, $"{bounds.X},{bounds.Y},{bounds.Width},{bounds.Height},{(maximized ? 1 : 0)}");
             }
             catch (Exception) { }
+        }
+
+        /// <summary>Where the window was before the page showed an environment's picture full screen.</summary>
+        Rectangle? fullScreenFrom;
+        bool fullScreenWasMaximized;
+
+        /// <summary>WebView2 fits a full-screen element to the window; the window fills the screen for it
+        /// (the page's 全屏, app.js) and comes back when it ends.</summary>
+        void FullScreenChanged()
+        {
+            var full = webView.CoreWebView2?.ContainsFullScreenElement == true;
+            if (full && fullScreenFrom == null)
+            {
+                fullScreenWasMaximized = WindowState == FormWindowState.Maximized;
+                fullScreenFrom = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                var screen = Screen.FromControl(this).Bounds;
+                FormBorderStyle = FormBorderStyle.None;
+                WindowState = FormWindowState.Normal;
+                Bounds = screen;
+            }
+            else if (!full && fullScreenFrom is Rectangle from)
+            {
+                fullScreenFrom = null;
+                FormBorderStyle = FormBorderStyle.Sizable;
+                Bounds = from;
+                if (fullScreenWasMaximized) WindowState = FormWindowState.Maximized;
+            }
         }
 
         public void BringForward()
@@ -241,6 +269,7 @@ namespace BrowserWorkbench
             core.NewWindowRequested += NewWindowRequested;
             core.DownloadStarting += DownloadStarting;
             core.PermissionRequested += PermissionRequested;
+            core.ContainsFullScreenElementChanged += (_, __) => FullScreenChanged();
             core.ProcessFailed += (_, e) => { if (port != 0 && e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) LoadWorkbench(port); };
             ShowStatus("正在启动 Browser Workbench…", "第一次启动可能需要几秒。");
             backend.Start();
@@ -693,6 +722,23 @@ namespace BrowserWorkbench
                     using (var stream = File.Create(Path.Combine(output, file + ".png")))
                         await webView.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
                     return Ok();
+                case "test.click":
+                    // A real click in the page, through the DevTools input: what needs a user's gesture (全屏).
+                    if (!(body.TryGetValue("x", out var x) && body.TryGetValue("y", out var y))) throw new BridgeError("bad request");
+                    foreach (var kind in new[] { "mousePressed", "mouseReleased" })
+                        await webView.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", json.Serialize(new Dictionary<string, object>
+                        {
+                            ["type"] = kind, ["x"] = Convert.ToDouble(x), ["y"] = Convert.ToDouble(y), ["button"] = "left", ["clickCount"] = 1,
+                        }));
+                    return Ok();
+                case "test.window":
+                    var screen = Screen.FromControl(this).Bounds;
+                    return new Dictionary<string, object>
+                    {
+                        ["borderless"] = FormBorderStyle == FormBorderStyle.None, ["state"] = WindowState.ToString(),
+                        ["bounds"] = new[] { Bounds.X, Bounds.Y, Bounds.Width, Bounds.Height },
+                        ["screen"] = new[] { screen.X, screen.Y, screen.Width, screen.Height },
+                    };
                 case "test.quit":
                     var stop = body.TryGetValue("stopEnvironments", out var value) && value is bool flag && flag;
                     BeginInvoke(new Action(() => _ = QuitAsync(stop)));
