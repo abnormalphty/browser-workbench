@@ -10,13 +10,14 @@ FastAPI 面板由 Mac 应用的原生窗口（v0.7 起）或本机浏览器（�
 
 - `launch.py` / `run.py`：本机启动入口，默认监听 127.0.0.1:8766。
 - `workbench/store.py`：SQLite 环境、订阅、账号记录和额度；新安装为空数据库。
+- `workbench/services.py`：环境可以选的网站（Claude、ChatGPT、Gemini 等，或“其他网站”的 https 地址）、各自的首页和套餐；首页经 launch.json 交给浏览器组件。旧环境都是 Claude 环境。
 - `workbench/subscriptions.py`：解析并验证订阅节点。
 - `workbench/runtime.py` / `resources.py`：仅管理本数据目录 scope 对应的容器，采样、启动 / 停止、暂停 / 唤醒及资源额度。
 - `workbench/geography.py`：节点地区、出口检测、IANA 时区。
 - `workbench/accounts.py` / `runtime/account_info.py`：用户主动执行的有限账号提示核对。
 - `workbench/transfers.py`：受保护的文件传输。
 - `workbench/terminal.py`：“终端”标签：`docker exec` 在环境里起一个小桥接程序（伪终端 + bash，以 browser 用户运行），页面经 WebSocket 收发；只接受工作台页面自己的连接。
-- `workbench/gateway.py` / `openai_compat.py`：模型网关：127.0.0.1 上单独的端口，用官方 SDK 把 Messages 请求原样转给 Anthropic，把 OpenAI 格式的请求换成 Messages；API 密钥、专属密钥、设置历史与用量存在 SQLite 的设置表里。
+- `workbench/gateway.py` / `openai_compat.py` / `providers.py`：模型网关：127.0.0.1 上单独的端口。每个 API 密钥属于一个服务（`providers.py`）；请求按模型交给提供它的密钥：Anthropic（及 Anthropic 兼容服务）用官方 SDK 原样转发 Messages 请求，OpenAI 格式的请求发给 Claude 时换成 Messages，发给其他服务时用 httpx 原样转发。API 密钥、专属密钥、设置历史与用量存在 SQLite 的设置表里。
 - `static/`：本机界面（`app.js`，模型网关页在 `gateway.js`）、世界地图与剪贴板桥接；`static/vendor/xterm/` 是原样附带的 xterm.js。
 - `runtime/`：容器构建与桌面进程，不使用浏览器调试连接。
 

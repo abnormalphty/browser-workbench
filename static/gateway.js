@@ -3,8 +3,9 @@
 // helpers ($, api, toast, esc, icon, showDialog, confirmStorage …). An API key never comes back from the
 // backend in full; a program's own key goes straight to the clipboard when the user asks for it.
 let gateway=null, gatewayParts={}, editingKey=null, editingClient=null, guideClient=null;
-const keyStatus={ok:['running','可用'],invalid:['error','无效'],unreachable:['starting','未能验证']};
-const consoleUrl='https://platform.claude.com/settings/keys';
+const keyStatus={ok:['running','可用'],invalid:['error','无效'],unreachable:['starting','未能验证'],unlisted:['starting','未验证']};
+const providerOf=id=>gateway.providers.find(p=>p.id===id)||gateway.providers[0];
+const groupTitle=group=>group.title||`${group.key.provider_name} · ${group.key.name}`;
 const tokenCount=n=>n>=1e7?Math.round(n/1e6)+'M':n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e4?Math.round(n/1e3)+'K':n>=1e3?(n/1e3).toFixed(1)+'K':String(n);
 const stamp=seconds=>{if(!seconds)return'';const d=new Date(seconds*1000),two=v=>String(v).padStart(2,'0');return`${two(d.getMonth()+1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;};
 // The page refreshes every few seconds while it is open: a part is only redrawn when it changed, so a
@@ -43,15 +44,16 @@ function renderGateway(){
   $('gatewayAddress').textContent=g.address;
   $('gatewayPill').className='status-pill'+(up?' running':on?' error':'');$('gatewayPill').textContent=up?'运行中':on?'没有运行':'已关闭';
   $('gatewayToggle').textContent=on?'关闭网关':'开启网关';$('gatewayToggle').className='button '+(on?'secondary':'primary');
-  $('gatewayNote').textContent=up?'只有这台电脑上的程序能连接。工作台开着，网关才在运行。':'开启后，其他程序把接口地址填成这个地址，就能通过网关使用 Claude。';
+  $('gatewayNote').textContent=up?'只有这台电脑上的程序能连接。工作台开着，网关才在运行。':'开启后，其他程序把接口地址填成这个地址，就能通过网关使用你添加了 API 密钥的模型。';
   $('gatewayError').hidden=!g.error;$('gatewayError').textContent=g.error||'';
   $('gatewayKeyCount').textContent=g.keys.length;$('gatewayClientCount').textContent=g.clients.length;
   paint('gatewayKeys',g.keys.length?g.keys.map(k=>{
-    const [kind,label]=keyStatus[k.status]||keyStatus.ok;
-    return`<div class="gateway-row"><div class="gateway-row-main"><strong>${esc(k.name)}${k.default?'<span class="account-pill known">默认</span>':''}</strong><small><code>${esc(k.hint)}</code>${k.checked_at?' · 上次检查 '+stamp(k.checked_at):''}</small></div><span class="status-pill ${kind}">${label}</span><div class="gateway-row-actions"><button class="button secondary small" data-key-check="${k.id}">检查</button>${k.default?'':`<button class="button secondary small" data-key-default="${k.id}">设为默认</button>`}<button class="icon-button" data-key-rename="${k.id}" aria-label="修改名称" title="修改名称">${icon('edit')}</button><button class="icon-button" data-key-delete="${k.id}" aria-label="删除 API 密钥" title="删除">${icon('trash')}</button></div></div>`;
-  }).join(''):'<div class="gateway-empty"><p>还没有 API 密钥。在 Claude Console 创建一个 API 密钥（按用量计费），再添加到这里。</p><button class="text-button" data-open-console>打开 Claude Console ↗</button></div>');
+    const [kind,label]=keyStatus[k.status]||keyStatus.ok,count=k.models.length+k.manual_models.length;
+    const where=k.provider==='custom'&&k.base_url?` · ${esc(hostOf(k.base_url)||k.base_url)}`:'';
+    return`<div class="gateway-row"><div class="gateway-row-main"><strong>${esc(k.name)}<span class="gateway-provider">${esc(k.provider_name)}</span>${k.default?'<span class="account-pill known">默认</span>':''}</strong><small><code>${esc(k.hint)}</code>${where}${count?` · ${count} 个模型`:''}${k.checked_at?' · 上次检查 '+stamp(k.checked_at):''}</small></div><span class="status-pill ${kind}">${label}</span><div class="gateway-row-actions"><button class="button secondary small" data-key-check="${k.id}">检查</button>${k.default?'':`<button class="button secondary small" data-key-default="${k.id}">设为默认</button>`}<button class="icon-button" data-key-rename="${k.id}" aria-label="修改名称和模型" title="修改名称和模型">${icon('edit')}</button><button class="icon-button" data-key-delete="${k.id}" aria-label="删除 API 密钥" title="删除">${icon('trash')}</button></div></div>`;
+  }).join(''):'<div class="gateway-empty"><p>还没有 API 密钥。在 Claude Console、OpenAI、DeepSeek 等平台创建 API 密钥（按用量计费），再添加到这里。</p><button class="text-button" data-add-key>添加 API 密钥</button></div>');
   paint('gatewayClients',g.clients.map(c=>{
-    const keyName=g.keys.find(k=>k.id===c.key_id)?.name||'默认 API 密钥';
+    const keyName=g.keys.find(k=>k.id===c.key_id)?.name||'自动选择 API 密钥';
     const models=c.mode==='fixed'?`固定使用 <code>${esc(c.default_model)}</code>`:c.models.length?`可选 ${c.models.length} 个模型：${c.models.map(m=>`<code>${esc(m)}</code>`).join(' ')}`:'可以用全部模型';
     return`<article class="information-card gateway-client${c.enabled?'':' disabled'}"><div class="information-card-heading"><div><h2>${esc(c.name)}</h2><small><code>${esc(c.hint)}</code> · ${esc(keyName)}</small></div><span class="status-pill${c.enabled?' running':''}">${c.enabled?'可用':'已停用'}</span></div><p class="gateway-models">${models}</p><div class="gateway-usage">${usageLine('今天',c.usage?.today)}${usageLine('近 30 天',c.usage?.month)}</div><div class="information-actions"><button class="button secondary small" data-client-copy="${c.id}">${icon('copy')}复制密钥</button><button class="button secondary small" data-client-guide="${c.id}">接入方法</button><button class="text-button" data-client-edit="${c.id}">编辑</button><button class="text-button" data-client-toggle="${c.id}">${c.enabled?'停用':'启用'}</button><button class="text-button" data-client-rotate="${c.id}">更换密钥</button><button class="text-button danger" data-client-delete="${c.id}">删除</button></div></article>`;
   }).join(''));
@@ -59,48 +61,88 @@ function renderGateway(){
 }
 
 // ---------- API keys ----------
+// A new key is for one service; an existing one only gets a new name and the models typed in for it.
+function providerChanged(){
+  const p=providerOf($('gatewayKeyProvider').value),custom=p.id==='custom';
+  $('gatewayKeyCustom').hidden=!custom;$('gatewayKeyCopy').hidden=custom||!p.console;
+  $('gatewayKeyCopyText').textContent=`在 ${p.name} 的控制台创建 API 密钥，按实际用量计费。`;
+  $('gatewayKeySecret').placeholder=custom?'本机的服务不需要密钥时可以不填':p.example||'API 密钥';$('gatewayKeySecret').required=!custom;
+}
 function openKeyDialog(key=null){
   editingKey=key;
-  $('gatewayKeyTitle').textContent=key?'修改名称':'添加 API 密钥';
-  $('gatewayKeyCopy').hidden=$('gatewayKeySecretField').hidden=$('gatewayKeyNote').hidden=!!key;
-  $('gatewayKeyName').value=key?key.name:'';$('gatewayKeySecret').value='';
+  $('gatewayKeyTitle').textContent=key?`编辑 ${key.provider_name} 的 API 密钥`:'添加 API 密钥';
+  $('gatewayKeyProviderField').hidden=$('gatewayKeySecretField').hidden=$('gatewayKeyNote').hidden=!!key;
+  if(key){$('gatewayKeyCopy').hidden=$('gatewayKeyCustom').hidden=true;$('gatewayKeySecret').required=false;}
+  else{
+    $('gatewayKeyProvider').innerHTML=gateway.providers.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    $('gatewayKeyProvider').value=gateway.keys.some(k=>k.provider==='anthropic')?'openai':'anthropic';$('gatewayKeyBase').value='';providerChanged();
+  }
+  $('gatewayKeyName').value=key?key.name:'';$('gatewayKeySecret').value='';$('gatewayKeyModels').value=key?key.manual_models.join('\n'):'';
   $('saveGatewayKey').textContent=key?'保存':'验证并保存';$('gatewayKeyError').hidden=true;
-  showDialog('gatewayKeyDialog');$('gatewayKeyName').focus();
+  showDialog('gatewayKeyDialog');(key?$('gatewayKeyName'):$('gatewayKeyProvider')).focus();
 }
+$('gatewayKeyProvider').onchange=providerChanged;
 $('gatewayKeyForm').onsubmit=async event=>{
   event.preventDefault();
-  const save=$('saveGatewayKey'),error=$('gatewayKeyError'),label=save.textContent;
+  const save=$('saveGatewayKey'),error=$('gatewayKeyError'),label=save.textContent,provider=$('gatewayKeyProvider').value;
   save.disabled=true;error.hidden=true;if(!editingKey)save.textContent='正在验证…';
   try{
-    const result=editingKey?await gatewayCall('keys/'+editingKey.id,{method:'PATCH',body:{name:$('gatewayKeyName').value}})
-      :await gatewayCall('keys',{method:'POST',body:{name:$('gatewayKeyName').value,secret:$('gatewayKeySecret').value}});
+    const result=editingKey?await gatewayCall('keys/'+editingKey.id,{method:'PATCH',body:{name:$('gatewayKeyName').value,models:$('gatewayKeyModels').value}})
+      :await gatewayCall('keys',{method:'POST',body:{name:$('gatewayKeyName').value,secret:$('gatewayKeySecret').value,provider,models:$('gatewayKeyModels').value,
+        ...(provider==='custom'?{base_url:$('gatewayKeyBase').value,api:document.querySelector('input[name="gatewayKeyApi"]:checked').value}:{})}});
     $('gatewayKeySecret').value='';hideDialog('gatewayKeyDialog');
-    toast(result.notice||(editingKey?'名称已保存。':'API 密钥已验证并保存。'));
+    toast(result.notice||(editingKey?'已保存。':'API 密钥已验证并保存。'));
   }catch(e){error.textContent=e.message;error.hidden=false;}
   finally{save.disabled=false;save.textContent=label;}
 };
 
 // ---------- a key for each program ----------
 function showMode(mode){$('gatewayChoice').hidden=mode!=='choice';$('gatewayFixed').hidden=mode!=='fixed';}
+// The models of the chosen API key, or of every key (each model once, the default key's first), by key.
+function modelGroups(keyId){
+  const keys=keyId?gateway.keys.filter(k=>k.id===keyId):[...gateway.keys].sort((a,b)=>b.default-a.default),seen=new Set();
+  return keys.map(key=>({key,models:[...key.models,...key.manual_models.map(id=>({id,display_name:id}))].filter(m=>!seen.has(m.id)&&seen.add(m.id))}))
+    .filter(group=>group.models.length);
+}
+function renderModelChoices(chosen,fixed){
+  const keyId=$('gatewayClientKey').value,groups=modelGroups(keyId),anywhere=new Set(modelGroups('').flatMap(g=>g.models.map(m=>m.id)));
+  // A model the program was given earlier stays listed after its service retires it, so the setting shows as it is.
+  const c=editingClient,saved=c?(c.mode==='fixed'?[c.default_model]:c.models):[];
+  const older=[...new Set(saved)].filter(m=>m&&!anywhere.has(m));
+  if(older.length)groups.push({title:'已不在模型列表里',models:older.map(id=>({id,display_name:id}))});
+  const total=groups.reduce((n,g)=>n+g.models.length,0),titled=groups.length>1||!keyId;
+  const option=m=>`<label class="model-option" data-find="${esc((m.id+' '+m.display_name).toLowerCase())}"><input type="checkbox" value="${esc(m.id)}"${chosen.includes(m.id)?' checked':''}><span>${esc(m.display_name)}</span>${m.display_name!==m.id?`<code>${esc(m.id)}</code>`:''}</label>`;
+  $('gatewayModelList').innerHTML=total?groups.map(g=>(titled?`<div class="model-group-title">${esc(groupTitle(g))}</div>`:'')+g.models.map(option).join('')).join('')
+    :'<p class="transfer-empty">添加并验证 API 密钥后，这里会列出可以用的模型。现在保存，表示全部模型都可以用。</p>';
+  $('gatewayFixedModel').innerHTML=groups.map(g=>`<optgroup label="${esc(groupTitle(g))}">${g.models.map(m=>`<option value="${esc(m.id)}">${esc(m.display_name===m.id?m.id:`${m.display_name}（${m.id}）`)}</option>`).join('')}</optgroup>`).join('');
+  if(fixed&&[...$('gatewayFixedModel').options].some(o=>o.value===fixed))$('gatewayFixedModel').value=fixed;
+  $('gatewayModelFilter').hidden=total<=12;filterModels();
+}
+function filterModels(){
+  const words=$('gatewayModelFilter').hidden?'':$('gatewayModelFilter').value.trim().toLowerCase();
+  $('gatewayModelList').querySelectorAll('.model-option').forEach(o=>o.hidden=!!words&&!o.dataset.find.includes(words));
+  $('gatewayModelList').querySelectorAll('.model-group-title').forEach(title=>{
+    let next=title.nextElementSibling,shown=false;
+    while(next&&!next.classList.contains('model-group-title')){shown||=!next.hidden;next=next.nextElementSibling;}
+    title.hidden=!shown;
+  });
+}
+$('gatewayModelFilter').oninput=filterModels;
 function openClientDialog(client=null){
   editingClient=client;
   $('gatewayClientTitle').textContent=client?'编辑专属密钥':'新建专属密钥';$('saveGatewayClient').textContent=client?'保存':'创建';
   $('gatewayClientName').value=client?client.name:'';
-  const standard=gateway.keys.find(k=>k.default);
-  $('gatewayClientKey').innerHTML=`<option value="">默认 API 密钥${standard?`（现在是“${esc(standard.name)}”）`:''}</option>`+gateway.keys.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');
+  $('gatewayClientKey').innerHTML='<option value="">自动：按模型选择 API 密钥（默认的优先）</option>'+gateway.keys.map(k=>`<option value="${esc(k.id)}">${esc(k.name)}（${esc(k.provider_name)}）</option>`).join('');
   $('gatewayClientKey').value=gateway.keys.some(k=>k.id===client?.key_id)?client.key_id:'';
-  const mode=client?.mode||'choice',chosen=client?.mode==='choice'?client.models:[];
+  const mode=client?.mode||'choice';
   document.querySelectorAll('input[name="gatewayMode"]').forEach(radio=>radio.checked=radio.value===mode);
-  // A model the program was given earlier stays listed after Anthropic retires it, so the setting shows as it is.
-  const listed=gateway.models.map(m=>m.id),older=[...new Set([...(client?.models||[]),client?.default_model])].filter(m=>m&&!listed.includes(m));
-  const all=[...gateway.models,...older.map(id=>({id,display_name:id,gone:true}))];
-  $('gatewayModelList').innerHTML=all.length?all.map(m=>`<label class="model-option"><input type="checkbox" value="${esc(m.id)}"${chosen.includes(m.id)?' checked':''}><span>${esc(m.display_name)}</span>${m.gone?'<small>已不在模型列表里</small>':''}<code>${esc(m.id)}</code></label>`).join('')
-    :'<p class="transfer-empty">添加并验证 API 密钥后，这里会列出可以用的模型。现在保存，表示全部模型都可以用。</p>';
-  $('gatewayFixedModel').innerHTML=all.map(m=>`<option value="${esc(m.id)}">${esc(m.display_name)}（${esc(m.id)}）</option>`).join('');
-  if(client?.mode==='fixed')$('gatewayFixedModel').value=client.default_model;
+  $('gatewayModelFilter').value='';
+  renderModelChoices(client?.mode==='choice'?client.models:[],client?.mode==='fixed'?client.default_model:null);
   showMode(mode);$('gatewayClientError').hidden=true;
   showDialog('gatewayClientDialog');$('gatewayClientName').focus();
 }
+// Another API key: the models chosen so far stay chosen.
+$('gatewayClientKey').onchange=()=>renderModelChoices([...$('gatewayModelList').querySelectorAll('input:checked')].map(input=>input.value),$('gatewayFixedModel').value||null);
 document.querySelectorAll('input[name="gatewayMode"]').forEach(radio=>radio.onchange=()=>showMode(radio.value));
 $('gatewayClientForm').onsubmit=async event=>{
   event.preventDefault();
@@ -138,7 +180,7 @@ $('gatewayPage').addEventListener('click',async event=>{
   const d=button.dataset,key=gateway.keys.find(k=>k.id===(d.keyCheck||d.keyDefault||d.keyRename||d.keyDelete)),
     client=gateway.clients.find(c=>c.id===(d.clientCopy||d.clientGuide||d.clientEdit||d.clientToggle||d.clientRotate||d.clientDelete));
   try{
-    if('openConsole' in d)openExternal(consoleUrl);
+    if('addKey' in d)openKeyDialog();
     else if(d.keyCheck){
       button.disabled=true;button.textContent='检查中…';
       try{toast((await gatewayCall(`keys/${key.id}/check`,{method:'POST'})).notice);}
@@ -147,7 +189,7 @@ $('gatewayPage').addEventListener('click',async event=>{
     }
     else if(d.keyDefault){await gatewayCall('keys/'+key.id,{method:'PATCH',body:{default:true}});toast(`“${key.name}”已设为默认 API 密钥。`);}
     else if(d.keyRename)openKeyDialog(key);
-    else if(d.keyDelete)confirmStorage('删除 API 密钥',`删除“${key.name}”后，用它的专属密钥会改用默认 API 密钥。API 密钥本身不在设置历史里，以后要用需要重新添加。`,'删除','danger',async()=>{await gatewayCall('keys/'+key.id,{method:'DELETE'});hideDialog('confirmDialog');toast('API 密钥已删除。');});
+    else if(d.keyDelete)confirmStorage('删除 API 密钥',`删除“${key.name}”后，只用它的专属密钥会改为自动选择 API 密钥。API 密钥本身不在设置历史里，以后要用需要重新添加。`,'删除','danger',async()=>{await gatewayCall('keys/'+key.id,{method:'DELETE'});hideDialog('confirmDialog');toast('API 密钥已删除。');});
     else if(d.clientCopy)copyLater(clientKey(client.id),'专属密钥已复制，可以粘贴到程序里。');
     else if(d.clientGuide)openGuide(client.id);
     else if(d.clientEdit)openClientDialog(client);
@@ -158,7 +200,7 @@ $('gatewayPage').addEventListener('click',async event=>{
 });
 $('gatewayToggle').onclick=async()=>{
   if(!gateway)return;
-  if(!gateway.enabled&&!gateway.keys.length){openKeyDialog();toast('先添加一个 Anthropic API 密钥，再开启网关。');return;}
+  if(!gateway.enabled&&!gateway.keys.length){openKeyDialog();toast('先添加一个 API 密钥，再开启网关。');return;}
   $('gatewayToggle').disabled=true;
   try{
     await gatewayCall('settings',{method:'PATCH',body:{enabled:!gateway.enabled}});
@@ -169,7 +211,7 @@ $('gatewayToggle').onclick=async()=>{
 $('copyGatewayAddress').onclick=()=>gateway&&copyLater(gateway.address,'地址已复制。');
 $('addGatewayKey').onclick=()=>gateway&&openKeyDialog();
 $('addGatewayClient').onclick=()=>gateway&&openClientDialog();
-$('openConsole').onclick=()=>openExternal(consoleUrl);
+$('openConsole').onclick=()=>{const p=providerOf($('gatewayKeyProvider').value);if(p.console)openExternal(p.console);};
 
 // ---------- settings and history ----------
 function modelsSummary(){$('gatewayModelsSummary').textContent=gateway.models.length?`已读到 ${gateway.models.length} 个模型${gateway.models_checked_at?'，更新于 '+stamp(gateway.models_checked_at):''}`:'还没有读到模型列表';}

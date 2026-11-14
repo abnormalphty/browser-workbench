@@ -34,7 +34,7 @@ async def start_browser():
         if CONFIG.get('engine','firefox') != 'firefox':
             raise ValueError('Unsupported retired engine')
         from native_firefox import NativeFirefox
-        NATIVE = NativeFirefox(CONFIG['test_mode'])
+        NATIVE = NativeFirefox(CONFIG['test_mode'], CONFIG.get('start_url'))
         await NATIVE.start()
         STATE.update(status='running', engine='firefox', url='', title='标准 Firefox')
         asyncio.create_task(refresh_ip())

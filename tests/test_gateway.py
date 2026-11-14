@@ -136,7 +136,9 @@ class PretendProxy(socketserver.TCPServer):
             self.server.lines.append(self.rfile.readline().decode('latin-1').strip())
 
 
-class GatewayTests(unittest.TestCase):
+class Setup:
+    """A gateway on a fresh data folder, with Anthropic's stand-in."""
+
     @classmethod
     def setUpClass(cls):
         # The fake is on this machine: a system proxy (macOS / Windows settings) must not carry the calls.
@@ -181,6 +183,8 @@ class GatewayTests(unittest.TestCase):
     def usage(self, index=0):
         return (self.gateway.state()['clients'][index]['usage'] or {}).get('today')
 
+
+class GatewayTests(Setup, unittest.TestCase):
     # ---------- settings ----------
 
     def test_only_api_keys_are_taken(self):
@@ -439,6 +443,259 @@ class GatewayTests(unittest.TestCase):
         self.assertIn(str(busy), self.gateway.state()['error'])
 
 
+OPENAI_KEY = 'sk-proj-' + 'o' * 40
+LISTED = [{'id': 'gpt-test', 'object': 'model', 'created': 1767225600, 'owned_by': 'openai'},
+          {'id': 'text-embedding-test', 'object': 'model', 'created': 1767225600, 'owned_by': 'openai'},
+          {'id': 'models/gemini-test', 'object': 'model', 'owned_by': 'google'}]
+
+
+def chunk(model, **values):
+    return 'data: ' + json.dumps({'id': 'chatcmpl-1', 'object': 'chat.completion.chunk', 'created': 1, 'model': model, **values}) + '\n\n'
+
+
+class FakeOpenAI:
+    """A stand-in for an OpenAI-format service on this machine (OpenAI, DeepSeek …): it notes what reaches it. Under
+    /nolist it has no model list, like services that do not offer one."""
+
+    def __init__(self):
+        self.requests = []
+        self.aborted = threading.Event()
+        self.sent = 0
+        routes = []
+        for prefix in ('/v1', '/nolist/v1'):
+            routes += [Route(prefix + '/models', self.models), Route(prefix + '/chat/completions', self.chat, methods=['POST'])]
+        sock = socket.socket()
+        sock.bind(('127.0.0.1', 0))
+        self.url = f'http://127.0.0.1:{sock.getsockname()[1]}'
+        self.server = uvicorn.Server(uvicorn.Config(Starlette(routes=routes), lifespan='off', log_config=None, access_log=False))
+        self.thread = threading.Thread(target=self.server.run, kwargs={'sockets': [sock]}, daemon=True)
+        self.thread.start()
+        deadline = time.monotonic() + 10
+        while not self.server.started and time.monotonic() < deadline:
+            time.sleep(.01)
+
+    def close(self):
+        self.server.should_exit = True
+        self.thread.join(10)
+
+    async def models(self, request):
+        if request.url.path.startswith('/nolist'):
+            return JSONResponse({'error': {'message': 'Not found', 'type': 'invalid_request_error'}}, status_code=404)
+        if request.headers.get('authorization') != f'Bearer {OPENAI_KEY}':
+            return JSONResponse({'error': {'message': 'Incorrect API key provided', 'type': 'invalid_request_error', 'code': 'invalid_api_key'}},
+                                status_code=401)
+        return JSONResponse({'object': 'list', 'data': LISTED})
+
+    async def chat(self, request):
+        body = await request.json()
+        self.requests.append({'path': request.url.path, 'headers': dict(request.headers), 'body': body})
+        model = body['model']
+        if model == 'gpt-missing':
+            return JSONResponse({'error': {'message': 'The model `gpt-missing` does not exist', 'type': 'invalid_request_error',
+                                           'code': 'model_not_found'}}, status_code=404, headers={'x-request-id': 'req_oa_missing'})
+        if not body.get('stream'):
+            return JSONResponse({'id': 'chatcmpl-1', 'object': 'chat.completion', 'created': 1, 'model': model,
+                                 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': '你好！'}, 'finish_reason': 'stop'}],
+                                 'usage': {'prompt_tokens': 20, 'completion_tokens': 9, 'total_tokens': 29,
+                                           'prompt_tokens_details': {'cached_tokens': 5}}},
+                                headers={'x-request-id': 'req_oa_1', 'x-ratelimit-remaining-requests': '99'})
+        usage = isinstance(body.get('stream_options'), dict) and body['stream_options'].get('include_usage')
+        return StreamingResponse(self.chunks(model, usage), media_type='text/event-stream', headers={'x-request-id': 'req_oa_2'})
+
+    async def chunks(self, model, usage):
+        yield chunk(model, choices=[{'index': 0, 'delta': {'role': 'assistant', 'content': ''}, 'finish_reason': None}])
+        if model == 'gpt-slow':
+            try:
+                for _ in range(200):
+                    self.sent += 1
+                    yield chunk(model, choices=[{'index': 0, 'delta': {'content': '.'}, 'finish_reason': None}])
+                    await asyncio.sleep(.05)
+            except BaseException:
+                self.aborted.set()
+                raise
+            return
+        for text in ('你', '好！'):
+            yield chunk(model, choices=[{'index': 0, 'delta': {'content': text}, 'finish_reason': None}])
+        yield chunk(model, choices=[{'index': 0, 'delta': {}, 'finish_reason': 'stop'}])
+        if usage:
+            yield chunk(model, choices=[], usage={'prompt_tokens': 20, 'completion_tokens': 9, 'total_tokens': 29})
+        yield 'data: [DONE]\n\n'
+
+
+class ServiceTests(Setup, unittest.TestCase):
+    """API keys of other services (OpenAI, Gemini, DeepSeek … and addresses of the user's own) next to Anthropic's."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.openai = FakeOpenAI()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.openai.close()
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        self.gateway.bases['openai'] = self.openai.url + '/v1'
+        self.openai.requests.clear()
+
+    def add_openai(self, name='OpenAI'):
+        self.assertIsNone(self.gateway.add_key(name, OPENAI_KEY, provider='openai'))
+        return self.gateway.config()['keys'][-1]['id']
+
+    def stream(self, path, token, body):
+        with self.http.stream('POST', path, headers={'authorization': f'Bearer {token}'}, json={**body, 'stream': True}) as response:
+            self.assertEqual(response.status_code, 200)
+            return [line for line in response.iter_lines() if line.startswith('data: ')]
+
+    def test_keys_of_other_services(self):
+        self.add_openai()
+        key = self.gateway.state()['keys'][0]
+        self.assertEqual((key['provider'], key['api'], key['status'], key['hint']), ('openai', 'openai', 'ok', 'sk-proj-…oooo'))
+        # Models a chat program cannot use are left out; Gemini's models/ prefix is not part of the name.
+        self.assertEqual([m['id'] for m in key['models']], ['gpt-test', 'gemini-test'])
+        self.assertNotIn(OPENAI_KEY, json.dumps([self.gateway.state(), self.gateway.history()]))
+        with self.assertRaisesRegex(ValueError, '不接受'):
+            self.gateway.add_key('坏的', 'sk-proj-' + 'x' * 40, provider='openai')
+        refusals = (('openai', 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln', '网页登录'), ('anthropic', 'sk-ant-sid01-' + 'x' * 40, '会话密钥'),
+                    ('openai', GOOD, 'Anthropic'), ('openai', 'sk-admin-' + 'x' * 40, '管理员'), ('gemini', 'ya29.' + 'x' * 40, 'Google'),
+                    ('openai', 'sk proj', '连续'), ('nope', OPENAI_KEY, '服务'))
+        for provider, secret, words in refusals:
+            with self.assertRaisesRegex(ValueError, words, msg=secret):
+                self.gateway.add_key('x', secret, provider=provider)
+        self.assertEqual(len(self.gateway.config()['keys']), 1)
+
+    def test_each_model_goes_to_the_key_that_offers_it(self):
+        self.add_key()
+        self.add_openai()
+        _, token = self.program()
+        self.serve()
+        bearer = {'authorization': f'Bearer {token}'}
+        everything = self.http.get('/v1/models', headers=bearer).json()['data']
+        self.assertEqual([(m['id'], m['owned_by']) for m in everything],
+                         [('claude-test-1', 'anthropic'), ('claude-test-2', 'anthropic'), ('gpt-test', 'openai'), ('gemini-test', 'openai')])
+        # Claude Code and other Anthropic clients see only what they can ask for in their format.
+        claude = self.http.get('/v1/models', headers=self.headers(token)).json()['data']
+        self.assertEqual([m['id'] for m in claude], ['claude-test-1', 'claude-test-2'])
+
+        answer = self.http.post('/v1/chat/completions', headers=bearer, json={'model': 'gpt-test', 'messages': USER, 'temperature': .2})
+        self.assertEqual(answer.json()['choices'][0]['message']['content'], '你好！')
+        self.assertEqual((answer.headers['x-request-id'], answer.headers['x-ratelimit-remaining-requests']), ('req_oa_1', '99'))
+        sent = self.openai.requests[-1]
+        self.assertEqual((sent['path'], sent['headers']['authorization']), ('/v1/chat/completions', f'Bearer {OPENAI_KEY}'))
+        self.assertEqual(sent['body'], {'model': 'gpt-test', 'messages': USER, 'temperature': .2})  # as it was sent
+        self.assertNotIn(token, json.dumps(sent))
+        usage = self.usage()
+        self.assertEqual((usage['requests'], usage['input'], usage['cache_read'], usage['output']), (1, 15, 5, 9))
+
+        claude_answer = self.http.post('/v1/chat/completions', headers=bearer, json={'model': 'claude-test-1', 'messages': USER})
+        self.assertEqual(claude_answer.json()['choices'][0]['message']['content'], '你好！')
+        self.assertEqual(self.fake.requests[-1]['path'], '/v1/messages')
+
+        wrong = self.http.post('/v1/messages', headers=self.headers(token), json={'model': 'gpt-test', 'max_tokens': 5, 'messages': USER})
+        self.assertEqual(wrong.status_code, 400)
+        self.assertIn('OpenAI 兼容格式', wrong.json()['error']['message'])
+
+        missing = self.http.post('/v1/chat/completions', headers=bearer, json={'model': 'claude-test-2', 'messages': USER})
+        self.assertEqual(missing.status_code, 200)
+        _, only_gpt = self.program(name='只用 GPT', key_id=self.gateway.config()['keys'][1]['id'])
+        listed = self.http.get('/v1/models', headers={'authorization': f'Bearer {only_gpt}'}).json()['data']
+        self.assertEqual([m['id'] for m in listed], ['gpt-test', 'gemini-test'])
+
+    def test_streams_from_other_services(self):
+        self.add_openai()
+        _, token = self.program()
+        self.serve()
+        # The gateway asks for the token counts itself, and keeps that extra chunk from a program that did not.
+        lines = self.stream('/v1/chat/completions', token, {'model': 'gpt-test', 'messages': USER})
+        self.assertTrue(self.openai.requests[-1]['body']['stream_options']['include_usage'])
+        self.assertEqual(lines[-1], 'data: [DONE]')
+        chunks = [json.loads(line[6:]) for line in lines[:-1]]
+        self.assertEqual(''.join(c['choices'][0]['delta'].get('content') or '' for c in chunks), '你好！')
+        self.assertTrue(all(c['choices'] for c in chunks))
+        self.assertEqual((self.usage()['input'], self.usage()['output']), (20, 9))
+        asked = self.stream('/v1/chat/completions', token, {'model': 'gpt-test', 'messages': USER, 'stream_options': {'include_usage': True}})
+        self.assertEqual(json.loads(asked[-2][6:])['usage']['completion_tokens'], 9)
+        self.assertEqual(self.usage()['requests'], 2)
+        # Errors come back as the service sent them.
+        _, chosen = self.program(name='选了不存在的模型', models=['gpt-missing'])
+        missing = self.http.post('/v1/chat/completions', headers={'authorization': f'Bearer {chosen}'},
+                                 json={'model': 'gpt-missing', 'messages': USER, 'stream': True})
+        self.assertEqual((missing.status_code, missing.json()['error']['code']), (404, 'model_not_found'))
+        self.assertEqual(missing.headers['x-request-id'], 'req_oa_missing')
+        self.assertEqual(self.usage(1)['errors'], 1)
+
+    def test_a_program_going_away_stops_the_other_services_answer(self):
+        self.add_openai()
+        _, token = self.program(mode='fixed', default_model='gpt-slow')  # a model no list has: its name says whose it is
+        self.serve()
+        with self.http.stream('POST', '/v1/chat/completions', headers={'authorization': f'Bearer {token}'},
+                              json={'model': 'anything', 'messages': USER, 'stream': True}) as response:
+            for line in response.iter_lines():
+                if '"."' in line:
+                    break
+        self.assertTrue(self.openai.aborted.wait(10), 'the call to the service should end with the program')
+        self.assertLess(self.openai.sent, 150)
+        self.assertEqual(self.openai.requests[-1]['body']['model'], 'gpt-slow')
+
+    def test_a_service_of_ones_own_without_a_model_list(self):
+        port = self.serve()
+        for address, problem in (('http://example.com/v1', 'https'), ('ftp://example.com', '接口地址'), (f'127.0.0.1:{port}/v1', '网关自己'),
+                                 ('https://user:pw@example.com/v1', '接口地址')):
+            with self.assertRaisesRegex(ValueError, problem, msg=address):
+                self.gateway.add_key('自己的', OPENAI_KEY, provider='custom', base_url=address, api='openai')
+        with self.assertRaisesRegex(ValueError, '格式'):
+            self.gateway.add_key('自己的', OPENAI_KEY, provider='custom', base_url='https://example.com/v1')
+        address = self.openai.url.removeprefix('http://') + '/nolist/v1/chat/completions'  # copied with the path of a request
+        note = self.gateway.add_key('自己的', OPENAI_KEY, provider='custom', base_url=address, api='openai')
+        self.assertIn('手动添加的模型', note)
+        key = self.gateway.state()['keys'][0]
+        self.assertEqual((key['status'], key['base_url'], key['provider_name']), ('unlisted', self.openai.url + '/nolist/v1', '其他兼容服务'))
+        self.gateway.update_key(key['id'], {'models': 'my-model\nteam/model-2:free'})
+        self.assertEqual(self.gateway.history()[0]['summary'], '修改“自己的”手动添加的模型')
+        _, token = self.program()
+        bearer = {'authorization': f'Bearer {token}'}
+        self.assertEqual([m['id'] for m in self.http.get('/v1/models', headers=bearer).json()['data']], ['my-model', 'team/model-2:free'])
+        self.assertEqual(self.http.get('/v1/models/team/model-2:free', headers=bearer).json()['owned_by'], 'custom')
+        answer = self.http.post('/v1/chat/completions', headers=bearer, json={'model': 'team/model-2:free', 'messages': USER})
+        self.assertEqual(answer.status_code, 200)
+        self.assertEqual(self.openai.requests[-1]['path'], '/nolist/v1/chat/completions')
+        refused = self.http.post('/v1/chat/completions', headers=bearer, json={'model': 'other-model', 'messages': USER})
+        self.assertIn('不能使用模型 other-model', refused.json()['error']['message'])
+        # Going back in the history brings back the models typed in then.
+        self.gateway.update_key(key['id'], {'models': []})
+        self.gateway.restore(1)
+        self.assertEqual(self.gateway.config()['keys'][0]['manual_models'], ['my-model', 'team/model-2:free'])
+
+    def test_settings_from_before_other_services(self):
+        main = 'a' * 16
+        self.store.set_setting('gateway', {'enabled': False, 'port': gw.DEFAULT_PORT, 'proxy': '', 'default_key': main,
+                                           'keys': [{'id': main, 'name': '旧密钥', 'secret': GOOD, 'status': 'ok', 'added_at': 1}],
+                                           'clients': [], 'models': [{**model, 'line': None} for model in MODELS], 'models_checked_at': 5})
+        key = self.gateway.state()['keys'][0]
+        self.assertEqual((key['provider'], key['models_checked_at'], [m['id'] for m in key['models']]),
+                         ('anthropic', 5, ['claude-test-1', 'claude-test-2']))
+        _, token = self.program()
+        self.serve()
+        answer = self.http.post('/v1/messages', headers=self.headers(token), json={'model': 'claude-test-1', 'max_tokens': 5, 'messages': USER})
+        self.assertEqual(answer.status_code, 200)
+        self.assertEqual(self.gateway.config()['keys'][0]['models'][0]['id'], 'claude-test-1')
+
+    def test_the_proxy_carries_other_services_but_not_ones_on_this_computer(self):
+        system, chosen = PretendProxy(), PretendProxy()
+        self.addCleanup(system.close)
+        self.addCleanup(chosen.close)
+        with patch.dict(os.environ, dict.fromkeys(('HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'), system.url)):
+            self.gateway.settings({'proxy': chosen.url})
+            note = self.gateway.add_key('远处的', 'sk-' + 'r' * 40, provider='custom', base_url='https://api.openai.invalid/v1', api='openai')
+            self.assertIn('暂时没能验证', note)
+            self.assertTrue(chosen.lines and all(line.startswith('CONNECT api.openai.invalid:443 ') for line in chosen.lines), chosen.lines)
+            through = len(chosen.lines)
+            self.assertIsNone(self.gateway.add_key('本机的', OPENAI_KEY, provider='custom', base_url=self.openai.url + '/v1', api='openai'))
+        self.assertEqual((system.lines, len(chosen.lines)), ([], through))
+
+
 class PageTests(unittest.TestCase):
     """The workbench page's side: /api/gateway behind the page's own token, and the server with the app."""
 
@@ -468,6 +725,29 @@ class PageTests(unittest.TestCase):
             self.assertNotIn(full, shown)
             restored = client.post('/api/gateway/history/1/restore', headers=headers).json()
             self.assertEqual(restored['clients'], [])
+
+    def test_keys_of_other_services_through_the_page(self):
+        app = create_app(self.data)
+        with TestClient(app, base_url='http://127.0.0.1:8766') as client:
+            token = re.search(r'name="workbench-token" content="([^"]+)"', client.get('/').text).group(1)
+            headers = {'X-Workbench-Token': token}
+            state = client.get('/api/gateway', headers=headers).json()
+            self.assertEqual([p['id'] for p in state['providers']][:3], ['anthropic', 'openai', 'gemini'])
+            refused = client.post('/api/gateway/keys', headers=headers, json={'name': '网页', 'secret': 'eyJhbGciOi.eyJzdWIi.c2ln', 'provider': 'openai'})
+            self.assertEqual(refused.status_code, 400)
+            self.assertIn('网页', refused.json()['error'])
+            nothing_there = f'http://127.0.0.1:{free_port()}/v1'
+            added = client.post('/api/gateway/keys', headers=headers, json={'name': '本机模型', 'secret': '', 'provider': 'custom', 'api': 'openai',
+                                                                         'base_url': nothing_there, 'models': 'qwen3:8b\nllama3.2'}).json()
+            self.assertIn('暂时没能验证', added['notice'])
+            key = added['keys'][0]
+            self.assertEqual((key['hint'], key['manual_models'], key['base_url']), ('不用密钥', ['qwen3:8b', 'llama3.2'], nothing_there))
+            self.assertEqual([m['id'] for m in added['models']], ['qwen3:8b', 'llama3.2'])
+            refreshed = client.post('/api/gateway/models/refresh', headers=headers).json()
+            self.assertIn('没能更新：“本机模型”', refreshed['notice'])
+            renamed = client.patch(f'/api/gateway/keys/{key["id"]}', headers=headers, json={'name': '本机', 'models': 'qwen3:8b'}).json()
+            self.assertEqual((renamed['keys'][0]['name'], renamed['keys'][0]['manual_models']), ('本机', ['qwen3:8b']))
+            self.assertIn('改名为“本机”、修改“本机”手动添加的模型', renamed['history'][0]['summary'])
 
     def test_the_server_runs_while_the_workbench_does(self):
         Store(self.data).set_setting('gateway', {'enabled': True, 'port': free_port()})

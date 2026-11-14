@@ -17,7 +17,8 @@ from .docker_setup import DockerSetup, SetupBlocked
 from .system import quiet, windows
 
 # Bump with runtime/Dockerfile's label whenever files under runtime/ change.
-RUNTIME_VERSION = '0.8.0'
+# 1.1.0: the browser opens the page the workbench names (start_url in launch.json).
+RUNTIME_VERSION = '1.1.0'
 IMAGE = 'local-browser-workbench:' + RUNTIME_VERSION
 ROOT = Path(__file__).resolve().parent.parent
 # First Docker Desktop start can sit behind its own agreement / sign-in pages.
@@ -245,7 +246,8 @@ class Runtime(ResourceControls):
                 volume = self.profile_volume(env_id)
                 self._run(['volume', 'create', '--label', f'workbench.scope={self.scope}', '--label', f'workbench.environment={env_id}', volume])
                 storage = ['--mount', f'type=volume,source={volume},target=/profile', '--mount', f'type=bind,source={transfer},target=/profile/transfer']
-            launch = {'environment_id': env_id, 'fingerprint_seed': env['fingerprint_seed'], 'engine': env.get('engine', 'firefox'), 'test_mode': test_mode, 'timezone':timezone, 'worker_secret': secrets.token_urlsafe(32), 'vnc_password': secrets.token_hex(4)}
+            from .services import start_url
+            launch = {'environment_id': env_id, 'fingerprint_seed': env['fingerprint_seed'], 'engine': env.get('engine', 'firefox'), 'test_mode': test_mode, 'timezone':timezone, 'start_url': start_url(env), 'worker_secret': secrets.token_urlsafe(32), 'vnc_password': secrets.token_hex(4)}
             for name, payload in [('launch.json', json.dumps(launch)), ('proxy.yaml', yaml.safe_dump(proxy or {}, allow_unicode=True))]:
                 path = config_dir / name
                 path.write_text(payload, encoding='utf-8')

@@ -14,8 +14,10 @@ import sys
 FORBIDDEN_NAMES = ('*.sqlite3', '*.sqlite', '*.sqlite3-*', 'launch.json', 'proxy.yaml', 'server.log', 'build.log',
                    '.workbench.lock', 'cookies.sqlite', 'places.sqlite', 'logins.json', 'key4.db', '.env')
 FORBIDDEN_DIRS = ('data', 'environments', 'verification-data', '.venv', '.git', 'transfer', 'firefox-standard')
-# An Anthropic key (API, subscription or admin) or a key the 模型网关 gave a program.
-KEYS = re.compile(rb'sk-ant-(?:api|oat|admin)\d\d-[A-Za-z0-9_-]{40,}|bwk-[A-Za-z0-9_-]{40}')
+# An Anthropic key (API, subscription or admin), a key of another service the 模型网关 takes (OpenAI, OpenRouter,
+# xAI, Google), or a key the 模型网关 gave a program.
+KEYS = re.compile(rb'sk-ant-(?:api|oat|admin)\d\d-[A-Za-z0-9_-]{40,}|bwk-[A-Za-z0-9_-]{40}|sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}'
+                  rb'|sk-or-v1-[0-9a-f]{64}|xai-[A-Za-z0-9]{60,}|AIza[0-9A-Za-z_-]{35}')
 
 
 def main(bundle):

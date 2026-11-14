@@ -31,6 +31,9 @@ class Store:
             columns={row[1] for row in db.execute('PRAGMA table_info(environments)')}
             if 'cpu_limit' not in columns:db.execute('ALTER TABLE environments ADD COLUMN cpu_limit REAL NOT NULL DEFAULT 2')
             if 'memory_limit_mb' not in columns:db.execute('ALTER TABLE environments ADD COLUMN memory_limit_mb INTEGER NOT NULL DEFAULT 2048')
+            # The website an environment is for (services.py); environments from before are Claude ones.
+            if 'service' not in columns:db.execute("ALTER TABLE environments ADD COLUMN service TEXT NOT NULL DEFAULT 'claude'")
+            if 'start_url' not in columns:db.execute('ALTER TABLE environments ADD COLUMN start_url TEXT')
         os.chmod(self.db, 0o600)
 
     @contextmanager
@@ -92,8 +95,9 @@ class Store:
         return self.get_setting('account:'+env_id,{'label':'','plan':'unknown','status':'unknown','source':'unknown','checked_at':None,'last_attempt':None,'verified':False,'plan_source':'unknown','status_source':'unknown','plan_checked_at':None,'status_checked_at':None})
 
     def save_account_info(self,env_id,data):
-        self.get_environment(env_id)
-        if data.get('plan') not in ('unknown','free','pro','max','team','enterprise') or data.get('status') not in ('unknown','active','blocked','logged_out'):
+        from .services import plan_keys
+        env=self.get_environment(env_id)
+        if data.get('plan') not in plan_keys(env.get('service')) or data.get('status') not in ('unknown','active','blocked','logged_out'):
             raise ValueError('账号套餐或状态不正确。')
         label=data.get('label','')
         if not isinstance(label,str):raise ValueError('账号备注应为文字。')
@@ -139,11 +143,13 @@ class Store:
             raise ValueError('找不到这个环境。')
         return dict(row)
 
-    def create_environment(self, name: str, node_id: str | None, engine: str = 'firefox', cpu_limit=2, memory_limit_mb=2048):
+    def create_environment(self, name: str, node_id: str | None, engine: str = 'firefox', cpu_limit=2, memory_limit_mb=2048,
+                           service=None, start_url=None):
         if engine != 'firefox':
             raise ValueError('当前仅支持标准 Firefox，旧内核已移除。')
         from .resources import validate_limits
         limits=validate_limits({'cpu_limit':cpu_limit,'memory_limit_mb':memory_limit_mb})
+        service, start_url = self.website(service, start_url)
         name = name.strip()
         if len(name) > 80 or any(ord(c) < 32 for c in name):
             raise ValueError('环境名称最多 80 个字符，不能包含控制字符。')
@@ -154,18 +160,34 @@ class Store:
             count = db.execute('SELECT COUNT(*) FROM environments').fetchone()[0]
             if count >= 100:
                 raise ValueError('首版最多保存 100 个环境。')
-            db.execute('INSERT INTO environments (id,name,node_id,fingerprint_seed,created_at,engine,timezone_mode,cpu_limit,memory_limit_mb) VALUES (?,?,?,?,?,?,?,?,?)', (env_id, name or f'环境 {count+1:02d}', node_id or None, secrets.token_hex(16), time.time(), engine,'node',limits['cpu_limit'],limits['memory_limit_mb']))
+            db.execute('INSERT INTO environments (id,name,node_id,fingerprint_seed,created_at,engine,timezone_mode,cpu_limit,memory_limit_mb,service,start_url) VALUES (?,?,?,?,?,?,?,?,?,?,?)', (env_id, name or f'环境 {count+1:02d}', node_id or None, secrets.token_hex(16), time.time(), engine,'node',limits['cpu_limit'],limits['memory_limit_mb'],service,start_url))
         return self.get_environment(env_id)
 
-    def update_environment(self, env_id: str, name: str, node_id: str | None):
-        self.get_environment(env_id)
+    @staticmethod
+    def website(service, start_url):
+        """The website an environment is for, and the address of an "其他网站" one."""
+        from .services import check_url, service_id
+        service = service_id(service)
+        return service, (check_url(start_url) if service == 'custom' else None)
+
+    def update_environment(self, env_id: str, name: str, node_id: str | None, service=None, start_url=None):
+        """service None keeps the website; another one keeps the sign-in data but not the recorded plan and status."""
+        env = self.get_environment(env_id)
         name = name.strip()
         if not name or len(name) > 80 or any(ord(c) < 32 for c in name):
             raise ValueError('请填写 1–80 个字符的环境名称。')
         if node_id:
             self.get_node(node_id)
+        service, start_url = (env['service'], env['start_url']) if service is None else self.website(service, start_url)
         with self.connect() as db:
-            db.execute('UPDATE environments SET name=?, node_id=? WHERE id=?', (name, node_id or None, env_id))
+            db.execute('UPDATE environments SET name=?, node_id=?, service=?, start_url=? WHERE id=?', (name, node_id or None, service, start_url, env_id))
+        if service != env['service']:
+            from .services import SERVICES
+            account = self.account_info(env_id)
+            account.update(plan='unknown', status='unknown', source='unknown', verified=False, plan_source='unknown', status_source='unknown',
+                           plan_checked_at=None, status_checked_at=None,
+                           note=f'网站已改为 {SERVICES[service]["name"]}，套餐和状态需要重新记录。')
+            self.set_setting('account:'+env_id, account)
         return self.get_environment(env_id)
 
     def delete_environment(self, env_id: str):

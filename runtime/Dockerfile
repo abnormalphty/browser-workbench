@@ -4,9 +4,9 @@ ARG TARGETARCH
 ARG MIHOMO_VERSION=v1.19.32
 # Keep in step with RUNTIME_VERSION in workbench/runtime.py.
 LABEL org.opencontainers.image.title="browser-workbench runtime" \
-      org.opencontainers.image.version="0.8.0" \
+      org.opencontainers.image.version="1.1.0" \
       org.opencontainers.image.source="https://github.com/abnormalphty/browser-workbench" \
-      workbench.runtime="0.8.0"
+      workbench.runtime="1.1.0"
 ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99 PYTHONUNBUFFERED=1 LANG=C.UTF-8
 
 # Mirrors reached through flaky proxies drop connections mid-download; retry.

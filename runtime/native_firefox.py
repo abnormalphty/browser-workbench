@@ -35,9 +35,20 @@ def firefox_preferences(test_mode):
     return prefs
 
 
+def opening_page(test_mode, start_url):
+    """The page the browser opens: the test page, or the website the workbench named (Claude when none)."""
+    if test_mode:
+        return 'file:///app/welcome.html'
+    if isinstance(start_url, str) and start_url.startswith('https://') and len(start_url) <= 500 \
+            and not any(c.isspace() or ord(c) < 32 for c in start_url):
+        return start_url
+    return 'https://claude.ai/'
+
+
 class NativeFirefox:
-    def __init__(self, test_mode):
+    def __init__(self, test_mode, start_url=None):
         self.test_mode = test_mode
+        self.start_url = start_url
         self.process = None
         self.window = None
         self.lock = asyncio.Lock()
@@ -52,7 +63,7 @@ class NativeFirefox:
         profile.mkdir(mode=0o700, exist_ok=True)
         prefs = firefox_preferences(self.test_mode)
         (profile/'user.js').write_text('\n'.join(f'user_pref({json.dumps(k)}, {json.dumps(v)});' for k,v in prefs.items()))
-        initial = 'file:///app/welcome.html' if self.test_mode else 'https://claude.ai/'
+        initial = opening_page(self.test_mode, self.start_url)
         self.process = subprocess.Popen(
             ['firefox-esr', '--no-remote', '--profile', str(profile), '--width', '1440', '--height', '900', 'about:blank'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

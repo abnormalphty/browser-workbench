@@ -14,10 +14,10 @@ Mac 应用的数据在 `~/Library/Application Support/BrowserWorkbench`，日志
 
 - 导入 / 更新订阅时，访问使用者填写的订阅服务。
 - 启动正式环境时，通过所选代理访问 api.ipify.org 查询出口 IP；出口地理检测（导入订阅后和每次打开工作台时自动进行）通过被检测的线路访问 ipwho.is，无响应时改用 ipinfo.io。
-- 浏览器访问使用者打开的网站；账号核对打开 Claude 设置页。
+- 环境启动时打开它所选网站的首页（例如 claude.ai、chatgpt.com，或使用者填写的地址），之后访问使用者打开的网站；账号核对打开 Claude 设置页。
 - 源码运行或联网构建时访问 Python、Debian、Docker 和 GitHub 等软件源；Mac 应用默认载入自带的浏览器组件，不需要这些访问。
 - 应用里点“下载 Docker Desktop”时，用默认浏览器打开 Docker 官方下载地址。
-- 模型网关开启后，本机程序经网关发出的请求，由工作台用你的 API 密钥通过 Anthropic 官方 SDK 转发到 api.anthropic.com（适用 Anthropic 自己的条款与隐私政策）；添加或检查 API 密钥时读取一次模型列表。网关只监听 127.0.0.1，不记录请求和回答的内容，只计次数和 token 数。
+- 模型网关开启后，本机程序经网关发出的请求，由工作台用对应的 API 密钥转发给提供该模型的服务：Claude 通过 Anthropic 官方 SDK 发到 api.anthropic.com（使用者填写的 Anthropic 兼容服务同样经这个 SDK 发到其地址），其他服务（OpenAI、Google、DeepSeek、xAI、Moonshot、阿里云、火山引擎、智谱、OpenRouter，或使用者自己填写的接口地址）按 OpenAI 格式直接发到该服务的接口地址；各自适用该服务的条款与隐私政策。添加或检查 API 密钥时读取一次该服务的模型列表（OpenRouter 另查一次密钥本身）。网关只监听 127.0.0.1，不记录请求和回答的内容，只计次数和 token 数。
 - 环境里的终端只在环境容器内运行命令；正式环境的命令经所选线路出网。
 
 不设置独立的项目遥测或账号收集服务。网站、代理提供商以及上游软件本身的数据政策各自适用。

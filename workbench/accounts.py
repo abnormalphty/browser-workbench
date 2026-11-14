@@ -4,7 +4,9 @@ from pathlib import Path
 
 
 def check_account(runtime,env_id):
- store=runtime.store;store.get_environment(env_id)
+ from .services import SERVICES
+ store=runtime.store;env=store.get_environment(env_id)
+ if not SERVICES.get(env.get('service'),{}).get('check'):raise ValueError('这个网站暂不支持自动核对，请手动记录套餐和状态。')
  with runtime.lock:
   runtime._not_checking(env_id)
   obj=runtime._inspect(env_id)

@@ -21,7 +21,7 @@ try {
   step('page runs in app mode with native bridge', native && document.documentElement.classList.contains('native-app'));
   // The page polls on its own; refresh() returns early while that call is in flight.
   await until(async () => { await refresh(); return state.app; }, 30000, 500);
-  step('backend reports app version', state.app?.version === '1.0.0' && state.app?.mode === 'desktop', JSON.stringify(state.app));
+  step('backend reports app version', state.app?.version === '1.1.0' && state.app?.mode === 'desktop', JSON.stringify(state.app));
   await snap('01-start');
   // Route time zones: the environment dialog says which zone a route brings, and whether DST applies now.
   const tzNode = {id: 'f'.repeat(32), name: '时区自测 洛杉矶', type: 'http', geo: {label: '洛杉矶', timezone: 'America/Los_Angeles', standard: 'UTC−08:00', daylight: 'UTC−07:00', now: 'UTC−07:00', dst_now: true, source: 'exit'}};
@@ -220,6 +220,13 @@ try {
   const added = await api('gateway/keys', {method: 'POST', body: {name: '自测', secret: 'sk-ant-api03-' + 'x'.repeat(40)}});
   step('模型网关: the bundled Anthropic SDK checks a key (here through a proxy that refuses)', added.keys[0]?.status === 'unreachable' &&
     added.notice?.includes('暂时没能验证'), JSON.stringify({notice: added.notice, keys: added.keys}));
+  // Another service's key goes the plain-HTTP way, through the same proxy; web sign-in tokens are refused.
+  const openai = await api('gateway/keys', {method: 'POST', body: {name: '自测 OpenAI', provider: 'openai', secret: 'sk-proj-' + 'x'.repeat(40)}});
+  const webToken = await api('gateway/keys', {method: 'POST', body: {name: '网页', provider: 'openai', secret: 'eyJhbGciOi.eyJzdWIi.c2ln'}}).then(() => null, e => e.message);
+  const second = openai.keys.find(k => k.provider === 'openai');
+  step('模型网关: an OpenAI key is checked the same way, a web sign-in token is refused', second?.status === 'unreachable' &&
+    openai.notice?.includes('api.openai.com') && webToken?.includes('网页'), JSON.stringify({notice: openai.notice, key: second, webToken}));
+  for (const key of openai.keys) await api('gateway/keys/' + key.id, {method: 'DELETE'});
   const off = await api('gateway/settings', {method: 'PATCH', body: {enabled: false}});
   step('模型网关 stops when switched off', !off.running, JSON.stringify({running: off.running}));
   setPage('environments');

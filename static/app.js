@@ -149,7 +149,7 @@ function confirmRestart(){
 function renderEnvironments(){
   const all=state.environments, query=$('environmentSearch').value.trim().toLowerCase();
   const nodes=new Map(state.nodes.map(n=>[n.id,n]));
-  const rows=all.filter(e=>(e.name+' '+(nodes.get(e.node_id)?.name||'')).toLowerCase().includes(query));
+  const rows=all.filter(e=>(e.name+' '+serviceName(e)+' '+(nodes.get(e.node_id)?.name||'')).toLowerCase().includes(query));
   $('totalEnvs').textContent=all.length;$('navCount').textContent=all.length;$('listCount').textContent=all.length;
   $('runningLimitLabel').textContent=' / '+(state.runtime.max_running||2);$('runningEnvs').textContent=all.filter(e=>['running','starting','paused'].includes(e.runtime.status)).length;
   $('totalNodes').textContent=state.nodes.length;
@@ -159,9 +159,9 @@ function renderEnvironments(){
     const r=e.runtime,n=nodes.get(e.node_id), index=all.findIndex(x=>x.id===e.id)+1;
     const names={running:'运行中',starting:'启动中',stopped:'已停止',error:'需要重试',paused:'低功耗'};
     const fp=r.fingerprint;
-    const core=e.engine==='firefox'?'标准 Firefox · 独立环境':'旧内核已移除 · 数据保留';
+    const core=esc(serviceName(e))+' · '+(e.engine==='firefox'?'标准 Firefox · 独立环境':'旧内核已移除 · 数据保留');
     const meta=fp?`${esc(fp.language)} · ${esc(fp.timezone)} · ${esc(fp.screen)}`:(r.timezone?`zh-CN · ${esc(r.timezone)} · 独立数据目录`:n?.geo?.timezone?`时区随线路 · ${esc(n.geo.timezone)} · 独立数据目录`:'原生浏览器配置 · 独立数据目录');
-    return `<article class="environment-row"><div class="environment-identity"><div class="env-avatar">${String(index).padStart(2,'0')}</div><div><div class="env-name" title="${esc(e.name)}">${esc(e.name)} ${accountPill(e.account)}</div><div class="env-meta env-core">${core}</div><div class="env-meta">${meta}</div></div></div><div class="env-node"><div class="node-name">${esc(n?.name|| (e.node_id?'原节点已失效':'未绑定线路'))}</div><div class="node-detail">${esc(n?.type.toUpperCase()||'可使用无代理测试')}</div></div><div class="env-status"><span class="status-pill ${esc(r.status)}">${r.status==='running'?'<i class="dot green"></i>':''}${names[r.status]||'未知状态'}</span>${r.test_mode?'<div class="node-detail">无代理测试</div>':''}</div><div class="env-runtime runtime-detail"><div class="ip">${esc(r.exit_ip|| (r.test_mode?'测试模式 · 无代理':'出口未检测'))}</div><div>${r.status==='stopped'?'未占用资源':r.memory_mb!=null?esc(r.memory_mb)+' MB · '+(r.cpu_cores!=null?r.cpu_cores.toFixed(2)+' 核':'CPU 待采样'):'等待资源采样'}</div>${r.error?`<div title="${esc(r.error)}">启动失败，点击重试</div>`:''}</div><div class="row-actions"><button class="button ${r.status==='running'?'primary':'secondary'}" data-action="open" data-id="${e.id}" ${r.status==='starting'?'disabled':''}>${r.status==='paused'?'唤醒并打开':r.status==='running'?'打开浏览器':r.status==='starting'?'启动中…':'启动环境'}</button>${['running','paused'].includes(r.status)?`<button class="button ghost" data-action="stop" data-id="${e.id}">停止</button>`:''}<button class="icon-button" data-action="info" data-id="${e.id}" title="查看信息" aria-label="查看 ${esc(e.name)} 的信息">${icon('info')}</button><button class="icon-button" data-action="edit" data-id="${e.id}" title="编辑环境" aria-label="编辑 ${esc(e.name)}" ${['running','starting','paused'].includes(r.status)?'disabled':''}>${icon('edit')}</button><button class="icon-button" data-action="delete" data-id="${e.id}" title="删除环境" aria-label="删除 ${esc(e.name)}" ${r.status==='starting'?'disabled':''}>${icon('trash')}</button></div></article>`;
+    return `<article class="environment-row"><div class="environment-identity"><div class="env-avatar">${String(index).padStart(2,'0')}</div><div><div class="env-name" title="${esc(e.name)}">${esc(e.name)} ${accountPill(e)}</div><div class="env-meta env-core">${core}</div><div class="env-meta">${meta}</div></div></div><div class="env-node"><div class="node-name">${esc(n?.name|| (e.node_id?'原节点已失效':'未绑定线路'))}</div><div class="node-detail">${esc(n?.type.toUpperCase()||'可使用无代理测试')}</div></div><div class="env-status"><span class="status-pill ${esc(r.status)}">${r.status==='running'?'<i class="dot green"></i>':''}${names[r.status]||'未知状态'}</span>${r.test_mode?'<div class="node-detail">无代理测试</div>':''}</div><div class="env-runtime runtime-detail"><div class="ip">${esc(r.exit_ip|| (r.test_mode?'测试模式 · 无代理':'出口未检测'))}</div><div>${r.status==='stopped'?'未占用资源':r.memory_mb!=null?esc(r.memory_mb)+' MB · '+(r.cpu_cores!=null?r.cpu_cores.toFixed(2)+' 核':'CPU 待采样'):'等待资源采样'}</div>${r.error?`<div title="${esc(r.error)}">启动失败，点击重试</div>`:''}</div><div class="row-actions"><button class="button ${r.status==='running'?'primary':'secondary'}" data-action="open" data-id="${e.id}" ${r.status==='starting'?'disabled':''}>${r.status==='paused'?'唤醒并打开':r.status==='running'?'打开浏览器':r.status==='starting'?'启动中…':'启动环境'}</button>${['running','paused'].includes(r.status)?`<button class="button ghost" data-action="stop" data-id="${e.id}">停止</button>`:''}<button class="icon-button" data-action="info" data-id="${e.id}" title="查看信息" aria-label="查看 ${esc(e.name)} 的信息">${icon('info')}</button><button class="icon-button" data-action="edit" data-id="${e.id}" title="编辑环境" aria-label="编辑 ${esc(e.name)}" ${['running','starting','paused'].includes(r.status)?'disabled':''}>${icon('edit')}</button><button class="icon-button" data-action="delete" data-id="${e.id}" title="删除环境" aria-label="删除 ${esc(e.name)}" ${r.status==='starting'?'disabled':''}>${icon('trash')}</button></div></article>`;
   }).join('');
 }
 let selectedMapKey=null, locationNodeId=null;
@@ -224,20 +224,35 @@ function updateTestOption(){
 function newEnvironment(test=false){
   $('resourceCreateFields').hidden=false;$('createCpuLimit').value=2;$('createMemoryLimit').value=2;setLimitInputBounds('createCpuLimit','createMemoryLimit');
   editingId=null;$('environmentEngine').disabled=false;$('environmentEngine').value='firefox';$('environmentDialogTitle').textContent='新建环境';$('saveEnvironment').innerHTML='创建环境<span>→</span>';$('environmentName').value=test?'本机测试环境':'';$('environmentError').hidden=true;$('testMode').checked=test;$('autoOpen').checked=true;$('autoOpenOption').hidden=false;
+  serviceOptions(state.environments.at(-1)?.service||'claude','');
   nodeOptions(test?null:state.nodes[0]?.id);showDialog('environmentDialog');$('environmentName').focus();
 }
 function editEnvironment(id){
   const env=state.environments.find(e=>e.id===id);if(!env)return;
   $('resourceCreateFields').hidden=true;
   editingId=id;$('environmentEngine').value=env.engine||'firefox';$('environmentEngine').disabled=true;$('environmentDialogTitle').textContent='编辑环境';$('saveEnvironment').textContent='保存修改';$('environmentName').value=env.name;$('environmentError').hidden=true;$('testMode').checked=false;$('autoOpenOption').hidden=true;
+  serviceOptions(env.service||'claude',env.start_url||'');
   nodeOptions(env.node_id);showDialog('environmentDialog');
 }
+// Which website the environment opens; "其他网站" takes an address.
+function serviceOptions(selected,url){
+  $('environmentService').innerHTML=(state.services||[]).map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  $('environmentService').value=selected;if(!$('environmentService').value)$('environmentService').value='claude';
+  $('environmentUrl').value=url;serviceChanged();
+}
+function serviceChanged(){
+  const s=serviceOf({service:$('environmentService').value}),custom=s.id==='custom',env=editingId&&state.environments.find(e=>e.id===editingId);
+  $('environmentUrlField').hidden=!custom;
+  $('environmentServiceNote').textContent=env&&env.service!==s.id?'改成别的网站后，环境里已有的登录数据仍然保留；账号信息里的套餐和状态会清空，需要重新记录。':custom?'环境启动后打开这个地址。只支持 https 网站。':`环境启动后打开 ${hostOf(s.url)}。一个环境建议只登录一个账号。`;
+}
+$('environmentService').onchange=serviceChanged;
 async function startEnvironment(id,testMode=false){
   await api(`environments/${id}/start`,{method:'POST',body:{test_mode:testMode}});pendingOpen=id;toast('环境正在启动，准备好后会自动打开。');await refresh();
 }
 async function openBrowser(id){
   const env=state.environments.find(e=>e.id===id);if(!env)return;
   $('browserHint').textContent=env.engine==='firefox'?'标准模式：跳转后的地址请以画面内地址栏为准':'返回工作台不会停止环境';
+  $('browserAddress').placeholder=`输入网页地址，例如 ${hostOf(env.start_url||serviceOf(env).url)||'claude.ai'}`;
   const view=await api(`environments/${id}/view`);activeId=id;$('browserName').textContent=env.name;$('browserMode').textContent=env.runtime.test_mode?'无代理测试':'运行中';$('browserFrame').src=view.url;$('browserAddress').value=env.runtime.url?.startsWith('http')?env.runtime.url:'';$('browserView').hidden=false;document.body.style.overflow='hidden';
   renderStrip();$('stripItems').querySelector('.current')?.scrollIntoView({block:'nearest',inline:'nearest'});
   if(viewTab==='terminal')openTerminal(id).catch(e=>toast(e.message,true));
@@ -275,7 +290,8 @@ $('environmentForm').onsubmit=async event=>{
   if(autoOpen&&!nodeId&&!$('testMode').checked){$('environmentError').hidden=false;$('environmentError').textContent='请选择节点，或勾选无代理测试模式。';return;}
   $('saveEnvironment').disabled=true;$('environmentError').hidden=true;
   try{
-    const env=await api(editingId?`environments/${editingId}`:'environments',{method:editingId?'PATCH':'POST',body:{name:$('environmentName').value,node_id:nodeId,...(!editingId?{engine:$('environmentEngine').value,cpu_limit:Number($('createCpuLimit').value),memory_limit_mb:Math.round(Number($('createMemoryLimit').value)*1024)}:{})}});
+    const service=$('environmentService').value,website={service,start_url:service==='custom'?$('environmentUrl').value:null};
+    const env=await api(editingId?`environments/${editingId}`:'environments',{method:editingId?'PATCH':'POST',body:{name:$('environmentName').value,node_id:nodeId,...website,...(!editingId?{engine:$('environmentEngine').value,cpu_limit:Number($('createCpuLimit').value),memory_limit_mb:Math.round(Number($('createMemoryLimit').value)*1024)}:{})}});
     hideDialog('environmentDialog');await refresh();
     if(autoOpen){await startEnvironment(env.id,!nodeId&&$('testMode').checked);}else{toast(editingId?'修改已保存。':'环境已创建。');}
   }catch(e){if($('environmentDialog').open){$('environmentError').hidden=false;$('environmentError').textContent=e.message;}else{toast(e.message,true);if(!state.runtime.image_ready)showDialog('runtimeDialog');}}finally{$('saveEnvironment').disabled=false;}
@@ -315,7 +331,7 @@ function renderStrip(){
   const all=state.environments,status=e=>e.runtime?.status||'stopped';
   $('stripSummary').textContent=`${all.filter(e=>['running','starting','paused'].includes(status(e))).length} / ${all.length} 已启动`;
   const html=all.map(e=>{const s=status(e),current=e.id===activeId;
-    return `<button class="strip-item${current?' current':''}" data-switch="${e.id}"${current?' aria-current="page"':''} title="${esc(e.name)} · ${statusNames[s]||'未知状态'}${current?' · 正在查看':' · '+(switchHints[s]||'')}"><span class="strip-dot ${esc(s)}"></span><span class="strip-name">${esc(e.name)}</span></button>`;}).join('');
+    return `<button class="strip-item${current?' current':''}" data-switch="${e.id}"${current?' aria-current="page"':''} title="${esc(e.name)} · ${esc(serviceName(e))} · ${statusNames[s]||'未知状态'}${current?' · 正在查看':' · '+(switchHints[s]||'')}"><span class="strip-dot ${esc(s)}"></span><span class="strip-name">${esc(e.name)}</span><span class="strip-service">${esc(serviceName(e))}</span></button>`;}).join('');
   // Redrawn only when something changed, so a click is never lost to the 6-second refresh.
   if(html===stripHtml)return;
   const items=$('stripItems'),scroll=items.scrollLeft;
@@ -469,7 +485,8 @@ async function refreshFiles(){
 }
 async function showTransfers(){
   if(!activeId)return;
-  $('transferEnvironment').textContent=state.environments.find(e=>e.id===activeId)?.name||'';
+  const transferEnv=state.environments.find(e=>e.id===activeId);
+  $('transferEnvironment').textContent=transferEnv?.name||'';$('claudeDownloadNote').hidden=serviceOf(transferEnv).id!=='claude';
   $('transferMessage').hidden=true;
   showDialog('filesDialog');
   try{await refreshFiles();}catch(e){transferMessage(e.message,true);}
@@ -633,9 +650,13 @@ $('locationForm').onsubmit=async event=>{
 
 // Account records and scoped resource telemetry.
 let limitsEnvironmentId=null, accountEnvironmentId=null, checkingAccount=false;
-const planNames={unknown:'待核实',free:'Free',pro:'Pro',max:'Max',team:'Team',enterprise:'Enterprise'};
+// Which website an environment is for (state.services, from workbench/services.py); environments from before are Claude ones.
+const serviceOf=e=>(state.services||[]).find(s=>s.id===(e?.service||'claude'))||{id:'claude',name:'Claude',url:'https://claude.ai/',check:true,plans:[]};
+const hostOf=url=>{try{return new URL(url).hostname.replace(/^www\./,'');}catch{return '';}};
+const serviceName=e=>e?.service==='custom'?(hostOf(e.start_url)||'其他网站'):serviceOf(e).name;
+const planLabel=(e,plan)=>!plan||plan==='unknown'?'待核实':serviceOf(e).plans.find(p=>p.id===plan)?.name||'待核实';
 const accountStatusNames={unknown:'待核实',active:'可用',blocked:'已封禁 / 停用',logged_out:'未登录'};
-function accountPill(account){const a=account||{};return `<span class="account-pill ${a.status==='blocked'?'blocked':a.plan&&a.plan!=='unknown'?'known':'unknown'}">${esc(a.status==='blocked'?'已封禁':planNames[a.plan]||'待核实')}</span>`;}
+function accountPill(e){const a=e?.account||{},plan=planLabel(e,a.plan);return `<span class="account-pill ${a.status==='blocked'?'blocked':plan!=='待核实'?'known':'unknown'}">${esc(a.status==='blocked'?'已封禁':plan)}</span>`;}
 function gigabytes(mb){return mb==null?'—':(mb/1024).toFixed(mb>=1024?2:3)+' GB';}
 function recordSource(a){if(a.plan_source&&a.status_source&&a.plan_source!==a.status_source)return `套餐：${a.plan_source==='manual'?'手动记录':a.plan_source==='page'?'页面核对':'未核对'}；状态：${a.status_source==='manual'?'手动记录':a.status_source==='page'?'页面核对':'未核对'}`;return a.source==='manual'?'手动记录':a.source==='page'?(a.verified?'已核对':'上次核对记录'):'尚未核对';}
 function showInformation(id){setPage('information');renderInformation();if(id){const card=$('info-'+id);card?.scrollIntoView({behavior:'smooth',block:'center'});card?.classList.add('highlight');setTimeout(()=>card?.classList.remove('highlight'),1800);}}
@@ -657,13 +678,17 @@ function renderInformation(){
     const x=e.runtime,a=e.account||{},paused=x.status==='paused',started=['running','paused'].includes(x.status),busy=x.status==='starting'||x.account_checking;
     const cpu=x.cpu_cores??(started?null:0),memory=x.memory_mb??(started?null:0),cpuLimit=x.effective_cpu_limit||e.cpu_limit||2,memLimit=x.effective_memory_limit_mb||e.memory_limit_mb||2048;
     const last=a.checked_at?new Date(a.checked_at*1000).toLocaleString():'暂无账号记录';
-    return `<article id="info-${e.id}" class="information-card"><div class="information-card-heading"><div><h2>${esc(e.name)}</h2><small>${esc(nodes.get(e.node_id)?.name||'无代理测试 / 未绑定线路')}</small></div><span class="status-pill ${esc(x.status)}">${({running:'运行中',paused:'低功耗',starting:'启动中',error:'需要重试',stopped:'已停止'})[x.status]||'未知'}</span></div><div class="account-line">${accountPill(a)}<strong>${esc(a.label||'账号未备注')}</strong><span>${esc(accountStatusNames[a.status]||'待核实')}</span></div><div class="account-record">${esc(recordSource(a))} · ${esc(last)}${a.last_attempt&&!a.verified?'<br>最近一次核对未确认，以上为已有记录。':''}</div><div class="resource-meter"><div><span>CPU</span><strong>${cpu==null?'待采样':cpu.toFixed(2)+' 核'} <small>/ ${cpuLimit} 核</small></strong></div><progress max="${cpuLimit}" value="${cpu||0}"></progress></div><div class="resource-meter"><div><span>内存${x.memory_stale?' · 上次采样':''}</span><strong>${gigabytes(memory)} <small>/ ${gigabytes(memLimit)}</small></strong></div><progress max="${memLimit}" value="${memory||0}"></progress></div>${paused?'<p class="paused-note">浏览器已暂停，内存仍保留。打开时会唤醒。</p>':''}<div class="information-actions"><button class="button secondary small" data-manage="account" data-id="${e.id}">账号信息</button><button class="button secondary small" data-manage="limits" data-id="${e.id}" ${busy?'disabled':''}>资源额度</button>${started?`<button class="button secondary small" data-manage="${paused?'resume':'pause'}" data-id="${e.id}" ${busy?'disabled':''}>${paused?'唤醒环境':'低功耗'}</button><button class="text-button" data-manage="stop" data-id="${e.id}" ${busy?'disabled':''}>停止</button>`:''}<button class="button primary small" data-manage="open" data-id="${e.id}" ${busy?'disabled':''}>${paused?'唤醒并打开':started?'打开':'启动'}</button></div></article>`;
+    return `<article id="info-${e.id}" class="information-card"><div class="information-card-heading"><div><h2>${esc(e.name)}</h2><small>${esc(nodes.get(e.node_id)?.name||'无代理测试 / 未绑定线路')}</small></div><span class="status-pill ${esc(x.status)}">${({running:'运行中',paused:'低功耗',starting:'启动中',error:'需要重试',stopped:'已停止'})[x.status]||'未知'}</span></div><div class="account-line">${accountPill(e)}<strong>${esc(a.label||'账号未备注')}</strong><span>${esc(accountStatusNames[a.status]||'待核实')}</span></div><div class="account-record">${esc(recordSource(a))} · ${esc(last)}${a.last_attempt&&!a.verified?'<br>最近一次核对未确认，以上为已有记录。':''}</div><div class="resource-meter"><div><span>CPU</span><strong>${cpu==null?'待采样':cpu.toFixed(2)+' 核'} <small>/ ${cpuLimit} 核</small></strong></div><progress max="${cpuLimit}" value="${cpu||0}"></progress></div><div class="resource-meter"><div><span>内存${x.memory_stale?' · 上次采样':''}</span><strong>${gigabytes(memory)} <small>/ ${gigabytes(memLimit)}</small></strong></div><progress max="${memLimit}" value="${memory||0}"></progress></div>${paused?'<p class="paused-note">浏览器已暂停，内存仍保留。打开时会唤醒。</p>':''}<div class="information-actions"><button class="button secondary small" data-manage="account" data-id="${e.id}">账号信息</button><button class="button secondary small" data-manage="limits" data-id="${e.id}" ${busy?'disabled':''}>资源额度</button>${started?`<button class="button secondary small" data-manage="${paused?'resume':'pause'}" data-id="${e.id}" ${busy?'disabled':''}>${paused?'唤醒环境':'低功耗'}</button><button class="text-button" data-manage="stop" data-id="${e.id}" ${busy?'disabled':''}>停止</button>`:''}<button class="button primary small" data-manage="open" data-id="${e.id}" ${busy?'disabled':''}>${paused?'唤醒并打开':started?'打开':'启动'}</button></div></article>`;
   }).join(''):'<div class="nodes-empty">新建环境后，可在这里查看账号与资源信息。</div>';
 }
 function setLimitInputBounds(cpuId,memoryId){const r=state.resources?.engine||{};$(cpuId).max=r.cpu_count||64;$(memoryId).max=r.memory_mb?Math.floor((r.memory_mb-512)/256)/4:256;}
 function showLimits(id){const e=state.environments.find(e=>e.id===id);if(!e)return;limitsEnvironmentId=id;$('limitsEnvironmentName').textContent=e.name;$('cpuLimitInput').value=e.cpu_limit||2;$('memoryLimitInput').value=(e.memory_limit_mb||2048)/1024;setLimitInputBounds('cpuLimitInput','memoryLimitInput');showDialog('limitsDialog');}
-function showAccount(id){const e=state.environments.find(e=>e.id===id);if(!e)return;accountEnvironmentId=id;const a=e.account||{};$('accountEnvironmentName').textContent=e.name;$('accountLabelInput').value=a.label||'';$('accountPlanInput').value=a.plan||'unknown';$('accountStatusInput').value=a.status||'unknown';updateAccountEvidence(e);showDialog('accountDialog');}
-function updateAccountEvidence(e){const a=e.account||{};$('accountEvidence').textContent=`${recordSource(a)}${a.checked_at?' · '+new Date(a.checked_at*1000).toLocaleString():''}${a.note?'。'+a.note:''}`;$('checkAccount').disabled=checkingAccount||e.runtime.status!=='running'||e.runtime.account_checking;$('checkAccount').textContent=checkingAccount?'正在核对，请暂不操作浏览器…':e.runtime.status==='paused'?'请先唤醒环境再核对':e.runtime.status!=='running'?'请先启动环境并登录 Claude':'核对当前账号 ↗';}
+function showAccount(id){const e=state.environments.find(e=>e.id===id);if(!e)return;accountEnvironmentId=id;const a=e.account||{},s=serviceOf(e);
+  $('accountTitle').textContent=`${serviceName(e)} 账号信息`;$('checkAccount').hidden=!s.check;
+  $('accountCheckNote').textContent=s.check?'核对会短暂打开 Claude 账单窗口，完成后关闭并返回原窗口。请暂时不要操作环境内浏览器。只读取明确的套餐与账号提示，不修改订阅。':'这个网站暂不支持自动核对：请在环境里看一下账号的套餐，再在下面手动记录。';
+  $('accountPlanInput').innerHTML='<option value="unknown">待核实</option>'+s.plans.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  $('accountEnvironmentName').textContent=`${e.name} · ${serviceName(e)}`;$('accountLabelInput').value=a.label||'';$('accountPlanInput').value=a.plan||'unknown';if(!$('accountPlanInput').value)$('accountPlanInput').value='unknown';$('accountStatusInput').value=a.status||'unknown';updateAccountEvidence(e);showDialog('accountDialog');}
+function updateAccountEvidence(e){const a=e.account||{};$('accountEvidence').textContent=`${recordSource(a)}${a.checked_at?' · '+new Date(a.checked_at*1000).toLocaleString():''}${a.note?'。'+a.note:''}`;$('checkAccount').disabled=checkingAccount||e.runtime.status!=='running'||e.runtime.account_checking;$('checkAccount').textContent=checkingAccount?'正在核对，请暂不操作浏览器…':e.runtime.status==='paused'?'请先唤醒环境再核对':e.runtime.status!=='running'?`请先启动环境并登录 ${serviceName(e)}`:'核对当前账号 ↗';}
 $('resourceSettings').onclick=()=>{$('maxRunningInput').value=state.runtime.max_running||2;const r=state.resources||{};$('resourceSettingsHint').textContent=`当前已启动 ${r.occupied||0} 个，可分配内存 ${gigabytes(r.memory_budget_mb)}。CPU 和内存额度在每个环境的“资源额度”里设置。`;showDialog('resourceSettingsDialog');};
 $('resourceSettingsForm').onsubmit=async event=>{event.preventDefault();$('saveResourceSettings').disabled=true;try{await api('resources/settings',{method:'PATCH',body:{max_running:Number($('maxRunningInput').value)}});hideDialog('resourceSettingsDialog');await refresh();toast('同时运行上限已保存。');}catch(e){toast(e.message,true);}finally{$('saveResourceSettings').disabled=false;}};
 $('limitsForm').onsubmit=async event=>{event.preventDefault();$('saveLimits').disabled=true;try{await api(`environments/${limitsEnvironmentId}/resources`,{method:'PATCH',body:{cpu_limit:Number($('cpuLimitInput').value),memory_limit_mb:Math.round(Number($('memoryLimitInput').value)*1024)}});hideDialog('limitsDialog');await refresh();toast('资源额度已保存。');}catch(e){toast(e.message,true);}finally{$('saveLimits').disabled=false;}};

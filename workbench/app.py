@@ -137,6 +137,8 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
     def state():
         result = store.public_state()
         result['app'] = {'version':__version__, 'mode':os.environ.get('WORKBENCH_MODE', 'source'), 'platform':sys.platform}
+        from .services import catalog
+        result['services'] = catalog()
         result['runtime'] = runtime.status()
         from .geography import PLACES
         result['geography'] = {'progress':dict(runtime.geography.progress),'places':list(PLACES.values())}
@@ -166,7 +168,8 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
         data = await body(request)
         from .resources import validate_limits
         limits=validate_limits(data);await asyncio.to_thread(runtime._validate_capacity,limits)
-        return public_environment(store.create_environment(text(data,'name'),node_id(data),engine=text(data,'engine','firefox'),**limits))
+        return public_environment(store.create_environment(text(data,'name'),node_id(data),engine=text(data,'engine','firefox'),**limits,
+                                                           service=data.get('service'),start_url=data.get('start_url')))
 
     @app.patch('/api/environments/{env_id}')
     async def update_environment(env_id: str, request: Request):
@@ -174,11 +177,13 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
         if env_id in runtime.jobs and runtime.jobs[env_id].is_alive():
             raise ValueError('请等待环境启动完成，再停止并编辑。')
         if (await asyncio.to_thread(runtime.state,env_id))['status'] not in ('stopped','error'):
-            raise ValueError('请先停止环境，再修改名称或绑定节点。')
+            raise ValueError('请先停止环境，再修改名称、网站或绑定节点。')
         data = await body(request)
         if 'engine' in data and data['engine'] != store.get_environment(env_id)['engine']:
             raise ValueError('浏览器类型创建后不能更换，请新建独立环境。')
-        return public_environment(store.update_environment(env_id, text(data,'name'), node_id(data)))
+        service = data.get('service')  # left out: the website stays as it is
+        return public_environment(store.update_environment(env_id, text(data,'name'), node_id(data), service=service,
+                                                           start_url=data.get('start_url')))
 
     @app.delete('/api/environments/{env_id}')
     def delete_environment(env_id: str, confirm: str = ''):
@@ -395,7 +400,8 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
     @app.post('/api/gateway/keys')
     async def gateway_add_key(request: Request):
         data = await body(request)
-        return await gateway_state(await asyncio.to_thread(gateway.add_key, text(data, 'name'), text(data, 'secret')))
+        return await gateway_state(await asyncio.to_thread(gateway.add_key, text(data, 'name'), text(data, 'secret'), data.get('provider'),
+                                                           data.get('base_url'), data.get('api'), data.get('models')))
 
     @app.patch('/api/gateway/keys/{key_id}')
     async def gateway_update_key(key_id: str, request: Request):
@@ -414,8 +420,8 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
 
     @app.post('/api/gateway/models/refresh')
     async def gateway_refresh_models():
-        models = await asyncio.to_thread(gateway.refresh_models)
-        return await gateway_state(f'模型列表已更新，共 {len(models)} 个。')
+        total, problems = await asyncio.to_thread(gateway.refresh_models)
+        return await gateway_state(f'模型列表已更新，共 {total} 个。' + (f'没能更新：{"；".join(problems)}' if problems else ''))
 
     @app.post('/api/gateway/clients')
     async def gateway_add_client(request: Request):
@@ -445,7 +451,7 @@ def create_app(data_dir: Path | None = None, control_token: str | None = None):
     @app.post('/api/gateway/history/{index}/restore')
     async def gateway_restore(index: int):
         missing = await asyncio.to_thread(gateway.restore, index)
-        notice = f'已恢复。{"、".join(missing)} 原来用的 API 密钥已删除，现在改用默认 API 密钥。' if missing else '已恢复到这一步的设置。'
+        notice = f'已恢复。{"、".join(missing)} 原来用的 API 密钥已删除，现在改为自动选择 API 密钥。' if missing else '已恢复到这一步的设置。'
         return await gateway_state(notice)
 
     @app.websocket('/view/{env_id}/terminal')

@@ -164,7 +164,7 @@ class ControlApiTests(unittest.TestCase):
         html = self.client.get('/').text
         token = re.search(r'name="workbench-token" content="([^"]+)"', html).group(1)
         state = self.client.get('/api/state', headers={'X-Workbench-Token':token}).json()
-        self.assertEqual(state['app']['version'], '1.0.0')
+        self.assertEqual(state['app']['version'], '1.1.0')
         self.assertIn('docker_download_url', state['runtime'])
 
 
